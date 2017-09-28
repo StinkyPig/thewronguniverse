@@ -1,412 +1,461 @@
-var v=document.getElementById('c'),c=v.getContext('2d');
-v.width=window.innerWidth,v.height=window.innerHeight;
-var t={s:0,d:1}; // object for time - s=last timestamp,d=delta movement
-var ctrl={l:false,r:false,u:false,d:false,f:false,nws:0,lv:3,sc:0,hs:0,db:false,dbkey:false,bt:0,bg:600,pt:0,np:2,stage:0,gr:1,grt:0,go:0}; /* object to store data for game control:
-l: true if left key held down
-r: true if right key held down
-f: true if fire key held down(space)
-nw: next wave index in ew
-nws: next wave timestamp
-lv: lives
-sc:score
-debug mode
-bt : bullett timestamp
-bg: ms between bullets
-pt: timestamp for next pickup
-np: next pickup
-stage: 0= menu 1=get ready 2=play 3=game over in 4=game over wait, 5=game over out
-gr: get ready alpha
-grt: get ready timer
-go: used for size on stage 3, timeron stage 4 and size again on stage 5
-*/
-var cols=[{b:'#16a085',f:'#1abc9c'},{b:'#27ae60',f:'#2ecc71'},{b:'#2980b9',f:'#3498db'},{b:'#8e44ad',f:'#9b59b6'},{b:'#f39c12',f:'#f1c40f'},{b:'#d35400',f:'#e67e22'},{b:'#c0392b',f:'#e74c3c'}]// some purty colours
-var bds=[]; // baddies / enemies
-var shot=new Audio();
-var exp=new Audio();
-shot=document.getElementById('sh');
-exp=document.getElementById('ex');
 
+/* CANVAS stuff */
+var canvas=document.getElementById('canvas');
+var context=canvas.getContext('2d');
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
 
+/* object to hold time info */
+var gameTime={
+    lastStamp:0, //last timestamp - a new timestamp is fetched every frame at the begining of the sync() function
+    deltaTime:1 // time passed since previous frame - used to calculate every movement iin the game.
+};
 
+/*object to hold game control info*/
+var gameControl={
+    keyPressed:{
+        left:false,
+        right:false,
+        up:false,
+        down:false,
+        fire:false
+    },
+    newEnemyWave:0, // time untiil new enemy wave released
+    score:0, // player's score
+    pickUpTime:0, //next pickup time
+    nextPickup:2, // 1=guns, 2=speed,3=shields
+    pickupGap:1200,// how many milliseconds 'til next pickup spawn
+    gameStage:0, // 0=menu, 1=get ready, 2==play, 3Game over text in, 4=gameover wait, 5=game over text out
+    getReadyAlpha:0, // for the alpha fade on stage 1
+    score:0,
+    stage: 0, // game stage 0=menu, 1=get ready, 2=play, 3=game over text grow in, 4=game over wait, 5=game over text shrink out
+    stageTimer: 0, // timer to be used in the animation of text in stages such as 'Get Ready' and 'Game Over'
+    stageAlpha: 0, // as above with alpha rather than time
+    stageSize: 0, // ditto size
+    asteroids:{ // object for asteroid control
+        time: 0, // time 'til next asteroid spawned
+        gap: 1500 // gap in milliseconds between asteroid spawns
+    },
+    debug: false,// debug mode - used to show certain info - like collision boxes/circles
 
+}
+
+var cols=[// some purty colours
+    { stroke:'#16a085', fill:'#1abc9c' },
+    { stroke:'#27ae60', fill:'#2ecc71' },
+    { stroke:'#2980b9', fill:'#3498db' },
+    { stroke:'#8e44ad', fill:'#9b59b6' },
+    { stroke:'#f39c12', fill:'#f1c40f' },
+    { stroke:'#d35400', fill:'#e67e22' },
+    { stroke:'#c0392b', fill:'#e74c3c' }
+]
+
+var enemies = []; // array for enemy objects 
+var particles = [];
+var pickups = [];
+var billboards = [];
+var enemyBullets = [];
+
+var soundFX={ // for all sound effects.
+    playerShot: new Audio('laser.ogg'),
+    explosion: new Audio('explosion.ogg')
+}
+
+/* event listener for keys pressed */
 document.addEventListener('keydown',function(e){
-    switch (e.which){
-        case 37:
-        ctrl.l=true;
-        break;
-        case 39:
-        ctrl.r=true;
-        break;
-        case 38:
-        ctrl.u=true;
-        break;
-        case 40:
-        ctrl.d=true;
-        break;
-        case 32:
-        ctrl.f=true;
-        //ctrl.dbkey=true;
-        break;
-    }
+    
+    let keyCode = e.which;
+    
+    if ( keyCode == 37 || keyCode == 65 ){ // left arrow or 'a'
+        gameControl.keyPressed.left = true;
+    } else if ( keyCode == 39 || keyCode == 68 ) gameControl.keyPressed.right = true; // right arrow or 'd'
+    
+    if ( keyCode == 38 || keyCode == 87 ){ // up arrow or 'w'
+        gameControl.keyPressed.up = true;
+    } else if ( keyCode == 40 || keyCode == 83 ) gameControl.keyPressed.down = true; // down arrow or 's'
+    
+    if( keyCode ==32 ) gameControl.keyPressed.fire = true;
+
 });
+
+/*event listener for keys released */
 document.addEventListener('keyup',function(e){
-    switch (e.which){
-        case 37:
-        ctrl.l=false;
-        break;
-        case 39:
-        ctrl.r=false;
-        break;
-        case 38:
-        ctrl.u=false;
-        break;
-        case 40:
-        ctrl.d=false;
-        break;
-        case 32:
-        ctrl.f=false;
-        ctrl.bt-=300;
-        break;
-    }
+    
+    let keyCode = e.which;
+    
+    if ( keyCode == 37 || keyCode == 65 ) gameControl.keyPressed.left = false; // left arrow or 'a'
+    if ( keyCode == 39 || keyCode == 68 ) gameControl.keyPressed.right = false; // right arrow or 'd'
+    if ( keyCode == 38 || keyCode == 87 ) gameControl.keyPressed.up = false; // up arrow or 'w'
+    if ( keyCode == 40 || keyCode == 83 ) gameControl.keyPressed.down = false; // down arrow or 's'
+    if( keyCode ==32 ) gameControl.keyPressed.fire = false;
+
 });
-ac={t:0,g:1500}; // astrois controller - t=timestamp for generation g=generation gap
 
-
-
-
+/********************************************************************************** */
 /********************************F U N C T I O N S********************************* */
+/********************************************************************************** */
 
-// turn percentage to pixels of canvas width - p=percentage - returns pixels
-function A(p){
-    return v.width*p/100;
+// turn percentage to pixels of canvas width - returns pixels
+function pixelSize( percent ){
+    return canvas.width * percent / 100;
 }
 
-// position object - o=object
-function B(o){
-    // console.log(ebs[0]);
-    var a,h,x,y,i,j=0;// angle, hypotenuse, position x position y - i&j loop counters
-    s=A(o.s);
-    var fr=0;// animation frame
-    for (i=0;i<o.p.length;i++){// loop through polys
-        if(o.id){
-            c.strokeStyle=(t.s>o.id)?o.p[i].b:'#411';
-            c.fillStyle=(t.s>o.id)?o.p[i].f:'#501';
+function posObj(o){// draw object/sprite - o=object
+    let s = pixelSize( o.size );
+    for (let i = 0; i < o.polygons.length; i++ ){// loop through polys
+        if( o.hitTime ){
+            context.strokeStyle = ( gameTime.lastStamp > o.hitTime ) ? o.polygons[i].stroke : '#411';
+            context.fillStyle = ( gameTime.lastStamp > o.hitTime ) ? o.polygons[i].fill : '#501';
         }else{
-            if(o.p[i].b)c.strokeStyle=o.p[i].b;
-            if(o.p[i].f)c.fillStyle=o.p[i].f;
+            if( o.polygons[i].stroke ) context.strokeStyle = o.polygons[i].stroke;
+            if( o.polygons[i].fill ) context.fillStyle = o.polygons[i].fill;
         }
-        c.lineWidth=(o.p[i].lw)?s*o.p[i].lw:s*.03;
-        c.shadowColor=(o.p[i].sh)?o.p[i].sh:'transparent';
-        if(o.p[i].sb)c.shadowBlur=s*o.p[i].sb/100;
-        c.beginPath();
-        c.lineCap=(o.p[i].lc)?o.p[i].lc:'butt';
-        if(o.p[i].l){
-            fr=(o.f)?(o.af+1>o.p[i].l.length)?0:o.af:0; //get animation frame catching any posible too long error
-            for (j=0;j<o.p[i].l[fr].length;j+=2){
-                a=(o.a+o.p[i].l[fr][j])/180*Math.PI;
-                h=s*o.p[i].l[fr][j+1]/100;
-                x=o.x+Math.cos(a)*h;
-                y=o.y+Math.sin(a)*h;
-                j>0 ? c.lineTo(x,y) : c.moveTo(x,y);
+        context.lineWidth = ( o.polygons[i].lineWidth ) ? s * o.polygons[i].lineWidth : s * 0.03;
+        context.shadowColor = ( o.polygons[i].shadow) ? o.polygons[i].shadow: 'transparent';
+        if( o.polygons[i].shadowBlur) context.shadowBlur = s * o.polygons[i].shadowBlur / 100;
+        context.beginPath();
+        context.lineCap = ( o.polygons[i].lineCap ) ? o.polygons[i].lineCap: 'butt';
+        if( o.polygons[i].lines ){
+            for ( let j=0; j < o.polygons[i].lines[0].length; j+= 2 ){
+                j > 0 ? context.lineTo( 
+                    o.position.x + Math.cos( (o.angle + o.polygons[i].lines[0][j]) * Math.PI / 180 ) * s * o.polygons[i].lines[0][j+1] / 100,
+                    o.position.y + Math.sin( (o.angle + o.polygons[i].lines[0][j]) * Math.PI / 180 ) * s * o.polygons[i].lines[0][j+1] / 100 ) :
+                    context.moveTo( 
+                    o.position.x + Math.cos( (o.angle + o.polygons[i].lines[0][j]) * Math.PI / 180 ) * s * o.polygons[i].lines[0][j+1] / 100,
+                    o.position.y + Math.sin( (o.angle + o.polygons[i].lines[0][j]) * Math.PI / 180 ) * s * o.polygons[i].lines[0][j+1] / 100 
+                );
             }
         }
-        if(o.p[i].a){
-            fr=(o.af+1>o.p[i].a.length)?0:o.af; //get animation frame catching any posible too long error
-            for (j=0;j<o.p[i].a[fr].length;j+=5){
-                a=(o.a+o.p[i].a[fr][j])/180*Math.PI;
-                h=s*o.p[i].a[fr][j+1]/100;
-                x=o.x+Math.cos(a)*h;
-                y=o.y+Math.sin(a)*h;
-                c.arc(x,y,o.p[i].a[fr][j+2]*s/100,o.p[i].a[fr][j+3],o.p[i].a[fr][j+4]);
+        if( o.polygons[i].arc){
+            for ( let j=0; j < o.polygons[i].arc[0].length; j+= 5 ){
+                context.arc( 
+                    o.position.x + Math.cos( (o.angle + o.polygons[i].arc[0][j]) * Math.PI / 180 ) * s * o.polygons[i].arc[0][j+1] / 100,
+                    o.position.y + Math.sin( (o.angle + o.polygons[i].arc[0][j]) * Math.PI / 180 ) * s * o.polygons[i].arc[0][j+1] / 100, 
+                    o.polygons[i].arc[0][j+2] * s / 100, 
+                    o.polygons[i].arc[0][j+3], 
+                    o.polygons[i].arc[0][j+4] 
+                );
             }
         }
-        c.closePath();
-        if(o.p[i].b)c.stroke();
-        if(o.p[i].f)c.fill();
+        context.closePath();
+        if( o.polygons[i].stroke ) context.stroke();
+        if( o.polygons[i].fill ) context.fill();
     }
-    if(ctrl.db){//this bit draws collision boxes and circles if debug flag true        
-        if (o.cl){
-            c.strokeStyle='green';
-            c.lineWidth=1;
-            if(o.cl.c){
-                for(i=0;i<o.cl.c.length;i+=3){
-                    c.beginPath();
-                    c.arc(o.x+(s*o.cl.c[i]/100),o.y+(s*o.cl.c[i+1]/100),s*o.cl.c[i+2]/100,0,6.2);
-                    c.stroke();
-                    c.closePath();
+    if( gameControl.debug ){//this bit draws collision boxes and circles if debug flag true        
+        if ( o.collision ){
+            context.strokeStyle = 'green';
+            context.lineWidth = 1;
+            if( o.collision.circle ){
+                for( let i = 0; i < o.collision.circle.length; i+= 3 ){
+                    context.beginPath();
+                    context.arc( o.position.x + ( s * o.collision.circle[i] / 100 ), o.position.y + ( s * o.collision.circle[i+1] / 100 ), 
+                        s * o.collision.circle[i+2] / 100, 0, 2 * Math.PI 
+                    );
+                    context.stroke();
+                    context.closePath();
 
                 }
             }
-            if(o.cl.r){
-                for(i=0;i<o.cl.r.length;i+=4){
-                    c.beginPath();
-                    c.rect(o.x+Math.cos(o.cl.r[i]*.01745)*s*o.cl.r[i+1]/100,
-                        o.y+Math.sin(o.cl.r[i]*.01745)*s*o.cl.r[i+1]/100,
-                        s*o.cl.r[i+2]/100,s*o.cl.r[i+3]/100
-                        );
-                    c.stroke();
-                    c.closePath();
+            if( o.collision.rectangle ){
+                for( let i = 0; i < o.collision.rectangle.length; i+= 4 ){
+                    context.beginPath();
+                    context.rect( o.position.x + Math.cos( o.collision.rectangle[i] * Math.PI / 180 ) * s * o.collision.rectangle[i+1] / 100,
+                        o.position.y + Math.sin( o.collision.rectangle[i] * Math.PI / 180 ) * s * o.collision.rectangle[i+1] / 100,
+                        s * o.collision.rectangle[i+2] / 100, s * o.collision.rectangle[i+3] / 100
+                    );
+                    context.stroke();
+                    context.closePath();
                 }
             }
         }
     }
 }
 
-function C(){//spawn random enemy
-    var r=Math.round(Math.random()*10),d=Math.random()*10;
-    for (var i=0;i<(pl.wp.g+pl.wp.s+pl.wp.sh);i++){
-        if(r<5){
-            bds.push(new $c(i*25,d));
-        }else{
-            cl=Math.floor(Math.random()*6);
-            Math.random()<.5?bds.push(new $b(Math.random()*v.width,i*2,cl)):bds.push(new $j(cl,i*50));
+function spawnEnemy(){//spawn random enemy
+    let r = Math.random(); // random number to decide on enemy type
+    let d = Math.random(); // different random number used for direction
+    for ( let i = 0; i < ( player.weapons.guns + player.weapons.speed + player.weapons.shields ); i++ ){// number of enemies spawned is determined by how strong player weapons are
+        if( r < 0.5 ){ // either all eyeballs or......... 
+            enemies.push( new eyeballEnemy( i * 25, d ) );// spawn new spinny eyeball enemy and push it onto enemies[] array. d rereents direction and i*25 is the initial angle the eyball sits in its circle/arc
+        }else{//...........all mixture of the two different enemiey ship types
+            let col=randomInt( 0, 6 );// random index 0-6 to be taken from cols[] array
+            Math.random() < 0.5 ? enemies.push( new homingEnemy( Math.random()*canvas.width, i * 2 , col ) ) : enemies.push( new straightDownEnemy( col, i*50 ) ); // spawn one of the two enemy ships and push it onto enemies[] array
         }
     }
 }
 
-function E(x,y,s,p){//explosion p=pickup possible?
-    for (var i=0;i<25;i++){
-        ptc.push(new $f(x+(Math.random()-0.5)*A(s)/2,y+(Math.random()-0.5)*A(s)/2,s));
-        if(i<12)ptc.d=0;  // no delay for first dozen
+function explosion(x, y, size, canPickup){ //explosion - canPickup = is a pickup possible, crashes into by enemmies into play ship don't spawn pickup ; size = size in % of screen width
+    for ( let i = 0; i < 25; i++ ){ //spawn 25 explosion clouds
+        particles.push( new explosionCloud( x + (Math.random()-0.5 ) * pixelSize( size ) / 2, y + (Math.random()-0.5 ) * pixelSize( size ) / 2, size) ); // spawn a random size cloud at randowm x,y within explosion size, and push it onto particles[] array
+        if( i < 12 )particles[i].delay = 0;  // no delay for first dozen explosion clouds
     }
-    if(p && t.s>ctrl.pt){
-        ctrl.pt=t.s+1200;
-        pkp.push(new $g(x,y,ctrl.np));
-        ctrl.np=ctrl.np%3+1;
+    if( canPickup && gameTime.lastStamp > gameControl.pickUpTime){ //if this explosion is pickup spawnable, is it time for a pickup spawn?
+        gameControl.pickUpTime = gameTime.lastStamp + gameControl.pickupGap; // set new time for next pickup spawn
+        pickups.push( new pickup( x, y, gameControl.nextPickup ) );// spawn a new pickup and push  it onto pickups[] array
+        gameControl.nextPickup = gameControl.nextPickup % 3 + 1; // add 1 to next pixk up using mod(%) to keep in 1-3 range
     }
-    ctrl.sc++;
-    G(exp);
+    gameControl.score++; // every kill is worth 1 point
+    playSFX( soundFX.explosion ); // play the explosion sound
 }
 
-function F(o1,o2){
-    var x1,y1,x2,y2,r1,r2,w1,w2,h1,h2,dx,dy;
-    var s1=A(o1.s),s2=A(o2.s); //size in pixels of each object
-    var i,j;//counter index variables
-    if (o1.cl.c){
-        for(i=0;i<o1.cl.c.length;i+=3){
-            x1=o1.x+Math.cos(o1.cl.c[i]*.01745)*s1*o1.cl.c[i+1]/100;// object 1 collision circle's x in pixels
-            y1=o1.y+Math.sin(o1.cl.c[i]*.01745)*s1*o1.cl.c[i+1]/100;// object 1 collision circle's y in pixels
-            r1=o1.cl.c[i+2]*s1/100;//collision circle's radius in pixels
-            if(o2.cl.c){
-                for (j=0;j<o2.cl.c.length;j+=3){
-                    x2=o2.x+Math.cos(o2.cl.c[j]*.01745)*s2*o2.cl.c[j+1]/100;// object 2 collision circle's x in pixels
-                    y2=o2.y+Math.sin(o2.cl.c[j]*.01745)*s2*o2.cl.c[j+1]/100;// object 2 collision circle's y in pixels
-                    r2=o2.cl.c[j+2]*s1/100;//collision circle's radius in pixels
-                    dx=x1-x2;
-                    dy=y1-y2;
-                    if((r1+r2)>Math.sqrt(dx*dx+dy*dy)){//if circles's joint radii is greater than the distance between both circle's centre then we have a hit
-                        return true;
+function collision( o1, o2 ){//chheck for collision between 2 objects
+    let s1 = pixelSize( o1.size ), s2 = pixelSize( o2.size ); //size in pixels of each object
+    if ( o1.collision.circle ){//does object 1 have collision circles?
+        for( let i = 0; i < o1.collision.circle.length; i += 3 ){ //if yes, let's cycle through them
+            let x1 = o1.position.x + Math.cos( o1.collision.circle[i] * Math.PI / 180 ) * s1 * o1.collision.circle[i+1] / 100;// object 1 collision circle's x in pixels
+            let y1 = o1.position.y + Math.sin( o1.collision.circle[i] * Math.PI / 180 ) * s1 * o1.collision.circle[i+1] / 100;// object 1 collision circle's y in pixels
+            let r1 = o1.collision.circle[i+2] * s1 / 100;//object 1 collision circle's radius in pixels
+            if( o2.collision.circle ){//does object 2 have collision circles?
+                for ( let j = 0; j < o2.collision.circle.length; j += 3 ){//if yes, let's cycle through them
+                    let x2 = o2.x + Math.cos( o2.cl.c[j] * Math.PI / 180 ) * s2 * o2.cl.c[j+1] / 100;// object 2 collision circle's x in pixels
+                    let y2 = o2.y + Math.sin( o2.cl.c[j] * Math.PI / 180 ) * s2 * o2.cl.c[j+1] / 100;// object 2 collision circle's y in pixels
+                    let r2 = o2.cl.c[j+2] *s1 / 100;//object 2 collision circle's radius in pixels
+                    let dx = x1-x2; // difference on the x
+                    let dy = y1-y2; // difference on the y
+                    if ( ( r1 + r2 ) > Math.sqrt( dx * dx + dy * dy ) ){//if circles's joint radii is greater than the distance between both circle's centre then we have a hit
+                        return true; //yes, we bumped no need for anymore checks
                     }
                 }
             }
-            if (o2.cl.r){
-                for(j=0;j<o2.cl.r.length;j+=4){
-                    x2=o2.x+Math.cos(o2.cl.r[j]*.01745)*s2*o2.cl.r[j+1]/100;
-                    y2=o2.x+Math.sin(o2.cl.r[j]*.01745)*s2*o2.cl.r[j+1]/100;
-                    w2=s2*o2.cl.r[j+2]/100;
-                    h2=s2*o2.cl.r[j+3]/100;
-                    if(cr(x2,y2,w2,h2,x1,y1,r1))return true;
+            if (o2.collision.rectangle){//does object 2 have collision rectangles?
+                for( let j = 0; j < o2.collision.rectangle.length; j+= 4 ){//if yes, let's cycle through them
+                    let x2 = o2.position.x + Math.cos( o2.collision.rectangle[j] * Math.PI / 180 ) * s2 * o2.collision.rectangle[j+1] / 100;// object 2 collision rectangle x position 
+                    let y2 = o2.position.y + Math.sin( o2.collision.rectangle[j] * Math.PI / 180 ) * s2 * o2.collision.rectangle[j+1] / 100;// object 2 collision rectangle y position
+                    let w2 = s2 * o2.collision.rectangle[j+2] / 100;// object 2 collision rectangle width
+                    let h2 = s2 * o2.collision.rectangle[j+3] / 100;// object 2 collision rectangle height
+                    if( circleRectangle( x2, y2, w2, h2 ,x1 ,y1 ,r1 ) )return true;// if true we hit
                 }
             }
         }
     }
-    if(o1.cl.r){
-        for(i=0;i<o1.cl.r.length;i+=4){
-            x1=o1.x+Math.cos(o1.cl.r[i]*.01745)*s1*o1.cl.r[i+1]/100;// obj1 x of collision box
-            y1=o1.y+Math.sin(o1.cl.r[i]*.01745)*s1*o1.cl.r[i+1]/100;// obj1 y of collision box
-            w1=s1*o1.cl.r[i+2]/100;//obj1 collision box width
-            h1=s1*o1.cl.r[i+3]/100;//obj1 collision box height
-            if (o2.cl.c){
-                for(j=0;j<o2.cl.c.length;j+=3){
-                    x2=o2.x+Math.cos(o2.cl.c[j])*s2*o2.cl.c[j+1]/100;//obj2 circle x
-                    y2=o2.y+Math.sin(o2.cl.c[j])*s2*o2.cl.c[j+1]/100;//obj2 circle y
-                    r2=o2.cl.c[j+2]*s2/100//obj2 circle radius
-                    if(cr(x1,y1,w1,h1,x2,y2,r2))return true;
+    if( o1.collision.rectangle ){// does object 1 have collision rectangles?
+        for( let i = 0; i < o1.collision.rectangle.length; i += 4){//cycle through them
+            let x1 = o1.position.x + Math.cos( o1.collision.rectangle[i] * Math.PI / 180 ) * s1 * o1.collision.rectangle[i+1] / 100;// obj1 x of collision box
+            let y1 = o1.position.y + Math.sin( o1.collision.rectangle[i] * Math.PI / 180 ) * s1 * o1.collision.rectangle[i+1] / 100;// obj1 y of collision box
+            let w1 = s1 * o1.collision.rectangle[i+2] / 100;//obj1 collision box width
+            let h1 = s1 * o1.collision.rectangle[i+3] / 100;//obj1 collision box height
+            if ( o2.collision.circle ){//obj 2 have collision circles?
+                for( let j = 0; j < o2.collision.circle.length; j += 3){//cycle through them
+                    let x2 = o2.position.x + Math.cos( o2.collision.circle[j] ) * s2 * o2.collision.circle[j+1] / 100;//obj2 circle x
+                    let y2 = o2.position.y + Math.sin( o2.collision.circle[j] ) * s2 * o2.collision.circle[j+1] / 100;//obj2 circle y
+                    let r2 = o2.collision.circle[j+2] * s2 / 100//obj2 circle radius
+                    if( circleRectangle( x1, y1, w1, h1, x2, y2, r2 ) )return true;// if true we have hit
                 }
+            }
+            if ( o2.collision.rectangle){// obj 2 have collision rectangles?
+                // there's no box-on-box collisions in game ATM so donn't need to write this code yet.
             }
         }
     }
-    function cr(rx,ry,rw,rh,cx,cy,cr){//circle-rectangle collision check
-        dx=Math.abs(cx-rx-rw/2);
-        dy=Math.abs(cy-ry-rh/2);//distance x and dixstance y between centres
-        if(dx>(rw/2+cr) || dy>(rh/2+cr)) return false;// can't be colliding
+
+    return false; //no hits
+
+    function circleRectangle( rx, ry, rw, rh, cx, cy, cr ){//circle-rectangle collision check - rx,ry,rw,rh = rectangle - cx,cy,cr = circle
+        let dx = Math.abs( cx - rx - rw / 2 );
+        let dy = Math.abs( cy - ry - rh / 2 );//distance x and distance y between centres
+        if( dx > ( rw / 2 + cr ) || dy > ( rh / 2 + cr ) ) return false;// can't be colliding
         if(dx<=(rw/2) || dy<=(rh/2)) return true;// definate hit
-        dx=dx-rw/2;dy=dy-rh/2;
+        dx = dx - rw / 2;
+        dy = dy - rh / 2;
         return ((cr*cr)>dx*dx+dy*dy); // touching at corner?
     }       
 }
 
-function G(e){ // playsound effects
+function playSFX(e){ // playsound effects
     e.currentTime=0;
     e.play();
 }
 
-function S() {// sync - draw frame
+function randomInt(min, max){ //return random integer between min and max inclusive
+    return Math.floor( Math.random() * ( max - min + 1 )) + min;
+}
+
+function sync() {// the callback function called by requestAnimationFrame - update objects and draw frame
     
-    //update timer for movement
-    var s=Date.now();
-    t.s==0 ? t.d=17:t.d=s-t.s;
+    //update time data
+    let timeStamp=Date.now();
+    gameTime.lastStamp==0 ? gameTime.deltaTime=17 : gameTime.deltaTime = timeStamp - gameTime.lastStamp; // if first frame we'll set delta for 60fps - dosn't realy matter, it's only 1 frame
+    gameTime.lastStamp=timeStamp;// record current timestamp
 
     //clear last frame
-    c.fillStyle='#2c3e50';
-    c.fillRect(0,0,v.width,v.height);
+    context.fillStyle='#2c3e50';
+    context.fillRect( 0, 0, canvas.width, canvas.height );
     
-
-    for(i=0;i<3;i++){// starfield
-        for(var j=0;j<sf[i].length;j++){
-            sf[i][j].u();
+    for( let i=0; i < 3; i++ ){// starfield
+        for( let j = 0; j < starfield[i].length; j++ ){
+            starfield[i][j].update();
         }
     }
 
-    if(s >ctrl.nws){ // time to spawn enemy wave?
-        ctrl.nws=s+4000;
-        C();
+    if( timeStamp > gameControl.newEnemyWave ){ // time to spawn enemy wave?
+        gameControl.newEnemyWave = timeStamp + 4000;// new enemy spawn time
+        spawnEnemy();
     }
 
-
-    for (i=pkp.length-1;i>-1;i--){ // particles layer1, loop backwards to avoid element being missed after splicing
-        if(pkp[i].u()){
-            pkp.splice(i,1);
+    for ( let i = pickups.length - 1; i>-1 ; i-- ){ // pickups, loop backwards to avoid element being missed after splicing
+        if( pickups[i].update() ){ // if return true then pick=dead
+            pickups.splice( i, 1 );
         }
     }
 
-    if (ctrl.stage==2)pl.u();// update player
+    if ( gameControl.stage == 2 ) player.update(); // update player if in a game
 
-    for (var i=bds.length-1;i>-1;i--){ // enemies/baddies - loop backwards to avoid element being missed after splicing
-        if(bds[i].u()){
-            bds.splice(i,1);
-        }
-    }
-    for (i=pl.bts.length-1;i>-1;i--){ // player bullets - loop backwards to avoid element being missed after splicing
-        if(pl.bts[i].u()){
-            pl.bts.splice(i,1);
-        }
-    }
-    for (i=ptc.length-1;i>-1;i--){ // particle - loop backwards to avoid element being missed after splicing
-        if(ptc[i].u()){
-            ptc.splice(i,1);
-        }
-    }
-    for (i=ebs.length-1;i>-1;i--){ //enemy bullets, loop backwards to avoid element being missed after splicing
-        if(ebs[i].u()){
-            ebs.splice(i,1);
+    for ( let i = enemies.length - 1; i > -1; i-- ){ // loop backwards to avoid element being missed after splicing
+        if( enemies[i].update() ){ //the enemy update function will return true if this object is to cease to exist
+            enemies.splice( i, 1 ); // in which case we take it out of the array.  No need to delete object as there are now references to it, so Javascript should clean it up
         }
     }
 
-    t.s=s;// record current timestamp
+    for ( let i = player.bullets.length-1; i > -1; i-- ){ // player bullets - loop backwards to avoid element being missed after splicing
+        if( player.bullets[i].update() ){//if return true then bullet=dead
+            player.bullets.splice( i, 1 );
+        }
+    }
+    for ( let i = particles.length-1; i > -1; i-- ){ // particle - loop backwards to avoid element being missed after splicing
+        if( particles[i].update() ){
+            particles.splice(i,1);
+        }
+    }
+    for ( let i = enemyBullets.length-1; i > -1; i-- ){ //enemy bullets, loop backwards to avoid element being missed after splicing
+        if( enemyBullets[i].update() ){//if return true then bullet=dead
+            enemyBullets.splice( i, 1);
+        }
+    }
     
-    if (t.s-ac.t>ac.g){//time for an astroid?
-        bds.push(new $a());
-        ac.t=t.s;
+    if ( gameTime.lastStamp > gameControl.asteroids.time ){//time for an asteroid?
+        enemies.push( new asteroid() );// create new astroid object and push it onto enemies[] array
+        gameControl.asteroids.time = gameTime.lastStamp + gameControl.asteroids.gap; //new time to wait for asteroid spawn
     }
-    for (i=blb.length-1;i>-1;i--){ // billboards, loop backwards to avoid element being missed after splicing
-        if(blb[i].u()){
-            blb.splice(i,1);
+
+    for ( let i = billboards.length-1; i> -1; i-- ){ // billboards, loop backwards to avoid element being missed after splicing
+        if( billboards[i].update() ){//returns true if billboard dead
+            billboards.splice( i, 1 );
         }
     }
     /* HUD */
-    hud.gi.u();
-    hud.si.u();
-    hud.shi.u();
-    hud.scr.u();
+    hud.gunIcon.update();
+    hud.speedIcon.update();
+    hud.shieldIcon.update();
+    hud.score.update();
 
-    if(ctrl.stage==0){
+    switch( gameControl.stage ){
 
-        c.fillStyle='rgba(0,0,0,.6)';
-        c.fillRect(0,0,v.width,v.height);
-
-            c.fillStyle='#34495e';
-            c.strokeStyle='#ecf0f1';
-            c.shadowBlur=0;
-            c.textAlign='center';
-            c.font=Math.round(v.width*.1).toString()+'px impact';
-            c.strokeText('The Wrong Universe',v.width/2,v.height/3);
-            c.fillText('The Wrong Universe',v.width/2,v.height/3);
-            c.font=Math.round(v.width*.03).toString()+'px impact';
-            c.strokeText('Cursor Keys or WASD to move.',v.width/2,v.height/2);
-            c.fillText('Cursor Keys or WASD to move.',v.width/2,v.height/2);
-            c.strokeText('Space key to fire',v.width/2,v.height*.6);
-            c.fillText('Space key to fire',v.width/2,v.height*.6);
-        c.font=Math.round(v.width*.05).toString()+'px impact';
-            c.strokeText('Press fire to play',v.width/2,v.height*.8);
-            c.fillText('Press fire to play',v.width/2,v.height*.8);
-
-            if(ctrl.f){
-                ctrl.stage=1
-                ctrl.gr=1;
-                ctrl.grt=t.s+1250;
+        case 2:
+            // game playing
+            break;
+        
+        case 0:// menu stage
+            context.fillStyle='rgba(0,0,0,.6)';
+            context.fillRect(0,0,canvas.width,canvas.height);//faded background
+            /* The menu text */
+            context.fillStyle='#34495e';
+            context.strokeStyle='#ecf0f1';
+            context.shadowBlur=0;
+            context.textAlign='center';
+            context.font=Math.round(canvas.width*.1).toString()+'px impact';
+            context.strokeText('The Wrong Universe',canvas.width/2,canvas.height/3);
+            context.fillText('The Wrong Universe',canvas.width/2,canvas.height/3);
+            context.font=Math.round(canvas.width*.03).toString()+'px impact';
+            context.strokeText('Cursor Keys or WASD to move.',canvas.width/2,canvas.height/2);
+            context.fillText('Cursor Keys or WASD to move.',canvas.width/2,canvas.height/2);
+            context.strokeText('Space key to fire',canvas.width/2,canvas.height*.6);
+            context.fillText('Space key to fire',canvas.width/2,canvas.height*.6);
+            context.font=Math.round(canvas.width*.05).toString()+'px impact';
+            context.strokeText('Press fire to play',canvas.width/2,canvas.height*.8);
+            context.fillText('Press fire to play',canvas.width/2,canvas.height*.8);
+            /* if fire pressed move to stage 1 and initialise all relevant variables */
+            if ( gameControl.keyPressed.fire ){
+                gameControl.stage = 1;
+                gameControl.stageAlpha = 1;
+                gameControl.stageTimer = gameTime.lastStamp + 1250; // this will be how long 'GET READY' will show fully opaque before alpha fade
+                player.position.x = canvas.width / 2,
+                player.position.y = canvas.height * 0.92,
+                player.weapons.guns = 1; player.weapons.speed = 0; player.weapons.shields = 0;
+                gameControl.score=0;
+                gameControl.pickupGap = 1200;
+                /* turn on players post hit flag for few seconds (makes player ship indistructable - flashes when in this stage) */
+                player.postHit.flag = true;
+                player.postHit.time = gameTime.lastStamp + 4000;
+                player.postHit.flash = 1; // 1 is on -1 is off - we'll starrt with on
+                player.postHit.flashTime = gameTime.lastStamp + 50; // 50 milliseconds between on and off for flash
             }
-    }
-    else if(ctrl.stage==1){
-        c.fillStyle='rgba(255,255,255,'+ctrl.gr.toString()+')';
-        c.textAlign='center';
-        c.font=v.width*.2+'px impact';
-        c.fillText('GET READY',v.width/2,v.height/2);
-        if(t.s>ctrl.grt)ctrl.gr-=.001*t.d;
-        if(ctrl.gr<0)ctrl.stage=2;
-    }else if(ctrl.stage==3){
-        c.fillStyle='#fff';
-        c.textAlign='center';
-        c.font=v.width*.2*ctrl.go+'px impact';
-        c.fillText('GAME OVER',v.width/2,v.height/2);
-        ctrl.go+=0.001*t.d;
-        if (ctrl.go>1){
-            ctrl.stage=4;
-            ctrl.go=t.s+1250;
-        }
-    }
-    else if(ctrl.stage==4){
-        c.fillStyle='#fff';
-        c.textAlign='center';
-        c.font=v.width*.2+'px impact';
-        c.fillText('GAME OVER',v.width/2,v.height/2);
-        if (t.s>ctrl.go){
-            ctrl.stage=5;
-            ctrl.go=1
-        }
-    }else if(ctrl.stage==5){
-        c.fillStyle='#fff';
-        c.textAlign='center';
-        c.font=v.width*.2*ctrl.go+'px impact';
-        c.fillText('GAME OVER',v.width/2,v.height/2);
-        ctrl.go-=0.0005*t.d;
-        if(ctrl.go<0)ctrl.stage=0;
+            break;
 
+        case 1://'GET READY' stage
+            /* display 'GET READY' at alpha strength of gameControl.stageAlpha */
+            context.fillStyle='rgba(255,255,255,' + gameControl.stageAlpha.toString() + ')';
+            context.textAlign='center';
+            context.font=canvas.width*.2+'px impact';
+            context.fillText('GET READY',canvas.width/2,canvas.height/2);
+            if( gameTime.lastStamp > gameControl.stageTimer ) gameControl.stageAlpha -= 0.001 * gameTime.deltaTime;// fade if 'GET READY' has been displayed long enough
+            if( gameControl.stageAlpha < 0 ) gameControl.stage = 2;// if alpha drops below 0 then move on to stage 2 (actual gameplay)
+            break;
+
+        case 3:// 'GAME OVER' text grow in
+            context.fillStyle='#fff';
+            context.textAlign='center';
+            context.font = canvas.width * 0.2 * gameControl.stageSize + 'px impact'; //growsize proportionate to canvas width 
+            context.fillText( 'GAME OVER', canvas.width/2, canvas.height / 2 );
+            gameControl.stageSize += 0.001 * gameTime.deltaTime;// grow text
+            if (gameControl.stageSize > 1){ // if fully grown go to stage 4
+                gameControl.stage = 4;
+                gameControl.stageTimer = gameTime.lastStamp + 1250; // 'game over' will stay full sized for 1.25 seconds
+            }
+            break;
+
+        case 4:// 'GAME OVER' wait for it......
+            context.fillStyle='#fff';
+            context.textAlign='center';
+            context.font = canvas.width *0.2 + 'px impact';
+            context.fillText( 'GAME OVER', canvas.width / 2, canvas.height / 2 );
+            if ( gameTime.lastStamp > gameControl.stageTimer ){/// wait for it........
+                gameControl.stage = 5;// next stage 5
+                gameControl.stageSize = 1; //starts fully grown i.e. 1
+            }
+            break;
+
+            case 5:// nearly same as stage 3, just in reverse.  Just srinks slower than it grew
+                context.fillStyle='#fff';
+                context.textAlign='center';
+                context.font=canvas.width * 0.2 * gameControl.stageSize + 'px impact';
+                context.fillText( 'GAME OVER', canvas.width / 2, canvas.height / 2 );
+                gameControl.stageSize -= 0.0005 * gameTime.deltaTime; // shrinks at half the speed it grew
+                if( gameControl.stageSize < 0 ) gameControl.stage = 0; //size smaller than zero? stage set to 0(menu)
+                break;
+
+            default:
+                console.log('Error: stage ' + gameControl.stage + ' does not exist');
     }
-    window.requestAnimationFrame(S); // keep the magic going :)
+
+    window.requestAnimationFrame(sync); // keep the magic going :)
 }
 
 
 
-/* the objects/sprites of the game
-x: x position of object
-y: y position of object
-a: angle of object
-s: size of object in % - percentage size of canvas width
-p:polygons - each object/sprite is made up of outlined and fill polygons drawn on top of each other
-p.b: border color of polygons
-p.f: fill color of polygons
-p.l: array of angles and hypotenuses to plot x,y points of poly's lines.
-*/
+/* sprite/obj - all x and y data of lines and arcs are stored as angle and hypotenuse pairs which posObj() turns to actual pixel x,y co-ords
+   hypotenuse is percentage figure.
+   this makes scaling and rotating the sprite very simple
 
-/* constructer objects*/
-function $a(x,y){ // asteroid
-    this.s=Math.round(Math.random()*20);  //scale - percentage of screen width
-    this.pw=this.s;//power (numer of hits it will take to destroy)
-    if(this.s<5) this.s=5; // Minimum size is 5%
-    this.x=v.width*Math.random();
-    this.y=0-A(this.s)/2; //just off top of screen
-    this.a=Math.random()*360; //random starting angle
-    this.rs=(25-this.s)*.0025; // rotation speed of asteroid
-    this.yv=(25-this.s)*.0125; // y velocity of asteroid
-    if (Math.random()>.5)this.rs*=-1; // let's have half of them spin backwards
-    this.af=0; // animation frame
-    this.id=0;
-    this.p=[
+/****************** C O N S T R U C T E R    O B J E C T S (CLASSES)****************** */
+
+function asteroid(){
+    this.size = randomInt(5,20); //scale - percentage of screen width
+    this.position = {
+        x: canvas.width * Math.random(),
+        y: 0 - pixelSize( this.size ) / 2, //just off top of screen
+    };
+    this.velocity = {
+        y: ( 25 - this.size ) * 0.0125,
+        angle: ( 25 - this.size ) * 0.00005
+    };
+    this.angle = Math.random() * 359;
+    if (Math.random()>.5) this.velocity.angle*= -1; // let's have half of them spin backwards
+    this.hitTime=0; //used when hit to display as hit colour for so long (75 milliseconds)
+    this.polygons=[
         {
-            b:'#594231',
-            f:'#836049',
-            l:[
+            stroke:'#594231',
+            fill:'#836049',
+            lines:[
                 [
                     270,50,
                     300,50,
@@ -422,9 +471,9 @@ function $a(x,y){ // asteroid
                 ]
             ]   
         },{
-            b:'#997055',
-            f:'#997055',
-            l:[
+            stroke:'#997055',
+            fill:'#997055',
+            lines:[
                 [
                     270,43,
                     300,40,
@@ -440,9 +489,9 @@ function $a(x,y){ // asteroid
                 ]
             ]
         },{
-            b:'#836049',
-            f:'#836049',
-            l:[
+            stroke:'#836049',
+            fill:'#836049',
+            lines:[
                 [
                     225,25,
                     270,25,
@@ -456,9 +505,9 @@ function $a(x,y){ // asteroid
                 ]
             ]
         },{
-            b:'#836049',
-            f:'#836049',
-            l:[
+            stroke:'#836049',
+            fill:'#836049',
+            lines:[
                 [
                     180,35,
                     185,32,
@@ -468,9 +517,9 @@ function $a(x,y){ // asteroid
                 ]
             ]
         },{
-            b:'#836049',
-            f:'#836049',
-            l:[
+            stroke:'#836049',
+            fill:'#836049',
+            lines:[
                 [
                     70,15,
                     100,15,
@@ -480,49 +529,52 @@ function $a(x,y){ // asteroid
             ]
         }
     ]
-    this.cl={//collision
-        c:[
+    this.collision={
+        circle:[
             0,0,47
         ]
     }
 
-    this.h=function(p){// taken hit p=pickup possible (crashing into ship = no pickup)
-        if(this.s<6){
-            E(this.x,this.y,this.s,p);
-            return true;
+    this.hit=function(p){// taken hit p=pickup possible (crashing into ship = no pickup)
+        if( this.size < 6 ){ //if asteroid is small enough blow it up
+            explosion( this.position.x, this.position.y, this.size, p);
+            return true; // asteroid is dead
         }
-        this.s--;
-        this.id=t.s+75;
-        return false;
+        this.size--;// else shrink it
+        this.hitTime = gameTime.lastStamp + 75;// and  set the time it will show as red to 75 milliseconds
+        return false; // nope, it's not dead
     }
 
-    this.u=function (){ // update function
-        var die=false;
-        this.a+=this.rs*t.d;//rotate astroid
-        this.y+=t.d*this.yv;// move it
-        B(this);
-        if (this.y>A(this.s)/2+v.height) die=true; // if asteroid gone off screen
-        if (ctrl.stage==2 && F(pl,this)){
-            die=this.h(false);
-            pl.h();
+    this.update=function (){// called once per frame
+        this.angle+= this.velocity.angle * gameTime.deltaTime;//rotate astroid
+        this.position.y+= this.velocity.y * gameTime.deltaTime;// move it
+        posObj( this ); //draw it
+        if ( this.position.y > pixelSize( this.size ) / 2 + canvas.height ) return true; // if asteroid gone off screen
+        if ( gameControl.stage == 2 && !(player.postHit.flag) && collision( this, player )){ // if game playing and players post hit flag is off, do a collision check etween this astroid and the player ship
+            player.hit();//player hit
+            return this.hit( false );// this asteroid hit, no pickup because hit player, we return result of call to this.hit() - ie dead or not
         }
-        return die;
+        return false;// if still on screen and not hit by player then still alive (bullet collisions will be taken care of by bullet's own collision checks)
     }
 }
 
-function $b(x,y,cl){// baddie 1
-    this.s=5; //scale/size % of canvas width
-    this.x=x; //x position
-    this.y=0-(v.height*y/100)-(A(s)/2) // y position
-    this.v=0.15+Math.random()*.1; // velocity
-    this.a=90; // angle
-    this.rv=0; // rotation velocity
-    this.af=0; // animation frame
-    this.p=[
+function homingEnemy(x,y,cl){ // enemy ship that homes in toward player - cl= index of colours array (cols[])
+    this.size=5; // % of canvas width
+    this.position = {
+        x: x,
+        y: 0 - (canvas.height * y / 100) - ( pixelSize( this.size ) / 2 ), // y recieved in function is percent of canvas height above screen.
+    };
+    this.velocity = {
+        direction: 0.15 + Math.random() * 0.1, // a straight line velcity, no x&y velocity - movement will be calculated to move toward player each frame
+        angle: 0
+    };
+    this.angle = 90;
+    this.animationFrame = 0;
+    this.polygons = [
         {
-            b:cols[cl].b,
-            f:cols[cl].f,
-            l:[
+            stroke: cols[cl].border,
+            fill: cols[cl].fill,
+            lines: [
                 [
                     0,10,
                     50,35,
@@ -534,8 +586,8 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            f:cols[cl].b,
-            l:[
+            fill: cols[cl].border,
+            lines: [
                 [
                     0,5,
                     50,15,
@@ -549,9 +601,9 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#95a5a6',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#95a5a6',
+            lines: [
                 [
                     45,37,
                     50,48,
@@ -568,9 +620,9 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#95a5a6',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#95a5a6',
+            lines: [
                 [
                     350,20,
                     10,20,
@@ -581,8 +633,8 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            f:'#bdc3c7',
-            l:[
+            fill: '#bdc3c7',
+            lines: [
                 [
                     50,48,
                     50,45,
@@ -593,8 +645,8 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            f:'#bdc3c7',
-            l:[
+            fill: '#bdc3c7',
+            lines: [
                 [
                     310,48,
                     310,45,
@@ -605,9 +657,9 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#95a5a6',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#95a5a6',
+            lines: [
                 [
                     350,20,
                     10,20,
@@ -618,8 +670,8 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            f:'#bdc3c7',
-            l:[
+            fill: '#bdc3c7',
+            lines: [
                 [
                     350,10,
                     10,10,
@@ -630,9 +682,9 @@ function $b(x,y,cl){// baddie 1
                 ]
             ]
         },{
-            b:'#2c3e50',
-            f:'#34495e',
-            l:[
+            stroke: '#2c3e50',
+            fill: '#34495e',
+            lines: [
                 [
                     348,3,
                     0,3.25,
@@ -644,63 +696,73 @@ function $b(x,y,cl){// baddie 1
             ]
         }
     ]
-    this.cl={ //collision
-        c:[ // circles
+    this.collision={
+        circle: [
                 0,-12,35
         ]
     }
 
-    this.h=function(p){// hit taken function - p=pickup possible?(no pickup when crash into ship)
-        E(this.x,this.y,this.s,p);
-        return true;
+    this.hit = function(p){// hit taken function - p=pickup possible?(no pickup when crash into ship)
+        explosion( this.position.x, this.position.y, this.size, p); // make explosion
+        return true; // yep, it dead
     }
 
-    this.u=function (){ // update function
-        var die=false;
-        var adj=pl.y-this.y;
-        var hyp=Math.sqrt(Math.pow((pl.x-this.x),2)+Math.pow((pl.y-this.y),2));
-        var ang=Math.acos(adj/hyp)*180/Math.PI;
-        if(pl.x>this.x){
-            this.a-=.1*t.d;
-            if(this.a<(90-ang))this.a=90-ang;
-        }else{
-            this.a+=.1*t.d;
-            if(this.a>(90+ang))this.a=90+ang;
+    this.update=function (){ // called once every frame
+        //need the hypotenuse and the adjacent of a triangle from this obj to player to calculate the angle - adj=adjacent, hyp=hypotenuse ang= angle 
+        let adj = player.position.y - this.position.y;
+        let hyp = Math.sqrt( Math.pow( ( player.position.x - this.position.x ), 2 ) + Math.pow( ( player.position.y - this.position.y ), 2 ) ); // Pythagoras was one of the best Javascript coders in ancient Greece :)
+        let ang = Math.acos( adj / hyp) * 180 / Math.PI;// voila, the angle this enemy must rotate to point at player - trig is cool!
+        if( player.position.x > this.position.x ){//if the player ship is to the right of this enemy
+            this.angle-= 0.1 * gameTime.deltaTime;// turn towards player position
+            if( this.angle < (90-ang) ) this.angle = 90-ang;// if turned beyond direction of player then set angle to point directly at player
+        }else{// if player ship is to the left, then do exact same stuff but in opposite direction
+            this.angle+= 0.1 * gameTime.deltaTime;
+            if( this.angle > (90+ang) )this.angle = 90+ang;
         }
-        if(this.a<50)this.a=50;
-        if(this.a>130)this.a=130;
-        this.x+=Math.cos(this.a*Math.PI/180)*this.v*t.d;
-        this.y+=Math.sin(this.a*Math.PI/180)*this.v*t.d;
-        B(this);
-        if (this.y>A(this.s)/2+v.height) die=true; // if gone off screen
-        if (ctrl.stage==2 && F(pl,this)){
-            die=this.h(false);
-            pl.h();
+        if ( this.angle < 40 ) this.angle = 40;// 50 degrees its left most we want enemy to point
+        if ( this.angle > 140 ) this.angle = 140; // ditto right
+        /* move it in the direction it is facing */
+        this.position.x+= Math.cos( this.angle * Math.PI/180 ) * this.velocity.direction * gameTime.deltaTime;
+        this.position.y+= Math.sin( this.angle * Math.PI/180 ) * this.velocity.direction * gameTime.deltaTime;
+        posObj( this ); // draw the sprite
+        if ( this.position.y > pixelSize( this.size ) / 2 + canvas.height ) return true; // if gone off screen
+        if ( gameControl.stage == 2 && !(player.postHit.flag) && collision( player, this ) ){ // if game playing and players post-hit flag is off, do a collision check between this enemy and the player ship
+            player.hit();// player's been hit
+            return this.hit( false );// return result of hit, which is whether this enemy dies or not becauuse of hit - send false as pickup spawnable            
         }
-        return die;
+        return false;// still on screen and not hit player the I'm still alive, bullets codewill deal with bullet hits
     }
 }
 
-function $c(cfx,dir){// baddie 2
-    var xo=v.width*8/100,yo=v.height*8/100;// x,y offsets
-    var ratio=v.width/v.height;//ratio screen width/height so we can make tvelocity diagonal corner  to corner
-    dir<5?this.cf={x:-xo,y:-yo,xv:.005*ratio,yv:.005,a:cfx}:this.cf={x:v.width+xo,y:-yo,xv:-.005*ratio,yv:.005,a:cfx};//
-    //this.cf={x:80,y:80,a:270}; // cf= center of flight - the point the ship is positioned from
-    this.s=5; //scale/size % of canvas width
-    this.x=0; //x position
-    this.y=0; // y position
-    //this.yv=     0.1; // y velocity
-    //this.xv=0; // x velocity
-    this.a=0; // angle
-    this.rv=0; // rotation velocity
-    this.af=0; // animation frame
-    this.bt=t.s+Math.random()*2000;// bullet time
-    this.p=[
+function eyeballEnemy(cfx,dir){
+    let xo = canvas.width * 8 / 100; let yo = canvas.height * 8 / 100;// x,y offsets
+    let ratio = canvas.width / canvas.height;//ratio screen width/height so we can make tvelocity diagonal corner  to corner
+    dir < 0.5 ?
+        this.cf={
+            x: 0-xo,
+            y: 0-yo,
+            xv: 0.005 * ratio,
+            yv: 0.005,
+            a: cfx
+        }
+        :
+        this.cf={
+            x: canvas.width+xo,
+            y: 0-yo,
+            xv: 0-.005 * ratio,
+            yv: 0.005,
+            a: cfx
+        };
+    this.size = 5; // % of canvas width
+    this.position={x: 0,y: 0};
+    this.angle = 0;
+    this.bulletTime = gameTime.lastStamp + Math.random() * 2000;// time until fire bullet
+    this.polygons=[
 
         {
-            b:'688',
-            f:'#9aa',
-            l:[
+            stroke: '688',
+            fill: '#9aa',
+            lines:[
                 [
                     35,30,
                     15,30,
@@ -708,9 +770,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     75,30,
                     45,30,
@@ -718,9 +780,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     115,30,
                     85,30,
@@ -728,9 +790,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     155,30,
                     125,30,
@@ -738,9 +800,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     195,30,
                     165,30,
@@ -748,9 +810,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     235,30,
                     205,30,
@@ -758,9 +820,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     275,30,
                     245,30,
@@ -768,9 +830,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     315,30,
                     285,30,
@@ -778,9 +840,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     355,30,
                     325,30,
@@ -788,9 +850,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     0,35,
                     15,35,
@@ -807,9 +869,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     345,30,
                     15,30,
@@ -817,9 +879,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     305,30,
                     335,30,
@@ -827,9 +889,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     265,30,
                     295,30,
@@ -837,9 +899,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     225,30,
                     255,30,
@@ -847,9 +909,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     185,30,
                     215,30,
@@ -857,9 +919,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     145,30,
                     175,30,
@@ -867,9 +929,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     105,30,
                     135,30,
@@ -877,9 +939,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     65,30,
                     95,30,
@@ -887,9 +949,9 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#9aa',
-            l:[
+            stroke: '#688',
+            fill: '#9aa',
+            lines:[
                 [
                     25,30,
                     55,30,
@@ -897,95 +959,104 @@ function $c(cfx,dir){// baddie 2
                 ]
             ]
         },{
-            b:'#688',
-            f:'#eef',
-            a:[
+            stroke: '#688',
+            fill: '#eef',
+            arc:[
                 [
                     0,0,20,0,6.3
                 ]
             ]
         },{
-            b:'#038',
-            f:'#159',
-            sh:'#222',
-            sb:5,
-            a:[
+            stroke: '#038',
+            fill: '#159',
+            shadow: '#222',
+            shadowBlurb: 5,
+            arc:[
                 [
                     0,0,10,0,6.3
                 ]
             ]
         },{
-            f:'#38d',
-            a:[
+            fill:'#38d',
+            arc:[
                 [
                     0,0,6,0,6.3
                 ]
             ]
         },{
-            f:'#001',
-            a:[
+            fill:'#001',
+            arc:[
                 [
                     0,0,4,0,6.3
                 ]
             ]
         }
     ]
-    this.cl={ //collision
-        c:[ // circles
+    this.collision = {
+        circle:[
                 0,0,45
         ]
     }
 
-    this.h=function(p){// hit taken function - p=pickup possible?(no pickup when crash into ship)
-        E(this.x,this.y,this.s,p);
-        return true;
+    this.hit = function(p){// hit taken function - p=pickup possible?(no pickup when crash into ship)
+        explosion( this.position.x, this.position.y, this.size, p ); //make explosion
+        return true; // yep, it be dead
     }
 
-    this.u=function (){ // update function
-        var die=false;
-        for (var x=0;x<9;x++){
-            for(var y=0;y<5;y+=2){
-                this.p[x].l[0][y]+=.1*t.d;
-                this.p[x+10].l[0][y]-=.1*t.d;
+    this.update = function (){ // the workhorse of an object
+        
+        /* spin the two teeth rings by changing the even numbers(inc 0) of the lines of the polygons that draw the teeth rings - the even numbers of each lines[] array is the angle to get the position*/
+        for ( let x = 0; x < 9; x++ ){
+            for( let y = 0; y < 5; y += 2 ){
+                this.polygons[x].lines[0][y]+= 0.1 * gameTime.deltaTime;
+                this.polygons[x+10].lines[0][y]-= 0.1 * gameTime.deltaTime;
             }
         }
-        var adj=pl.y-this.y;
-        var hyp=Math.sqrt(Math.pow((pl.x-this.x),2)+Math.pow((pl.y-this.y),2));
-        var ang=Math.acos(adj/hyp)*180/Math.PI;
-        for(x=20;x<23;x++){
-            this.p[x].a[0][0]=(pl.x>this.x)?90-ang:90+ang;
-            this.p[x].a[0][1]=10;
+        /* get the angle from this eyeball to player ship */
+        let adj = player.position.y - this.position.y;
+        let hyp = Math.sqrt( Math.pow( ( player.position.x - this.position.x ), 2 ) + Math.pow( (player.position.y - this.position.y), 2) );
+        let ang = Math.acos( adj / hyp ) * 180 / Math.PI;
+        for( let i = 20; i < 23; i++){// and point the iris at the player
+            this.polygons[i].arc[0][0] = ( player.position.x > this.position.x ) ? 90-ang : 90+ang;
+            this.polygons[i].arc[0][1] = 10;
         }
-        if(t.s>this.bt){
-            ebs.push(new $i(this.x,this.y));
-            this.bt=t.s+(3500+Math.random()*4000)-((pl.wp.g+pl.wp.s+pl.wp.sh)*200);
+
+        if( gameTime.lastStamp > this.bulletTime ){ //time to shoot a bullet
+            enemyBullets.push( new enemyBullet( this.position.x, this.position.y ) );//spawn new bullet and push onto enemyBullets[] array
+            this.bulletTime = gameTime.lastStamp + (3500+Math.random()*4000) - ( ( player.weapons.gguns + player.weapons.speed + player.weapons.shields ) * 200 );// next bullet time - more player weapons then shorter time
         }
-        this.cf.x+=A(this.cf.xv)*t.d;
-        this.cf.y+=A(this.cf.yv)*t.d;
-        this.cf.a+=0.2*t.d;
-        this.x=this.cf.x+Math.cos(this.cf.a*Math.PI/180)*150;
-        this.y=this.cf.y+Math.sin(this.cf.a*Math.PI/180)*150;
-        B(this);
-        if (this.y>A(this.s)/2+v.height) die=true; // if gone off screen
-        if (ctrl.stage==2 && F(pl,this)){
-            die=this.h(false);
-            pl.h();
+
+        /* move the centre eye snake, and rotate it */ 
+        this.cf.x += pixelSize( this.cf.xv ) * gameTime.deltaTime;
+        this.cf.y += pixelSize( this.cf.yv ) * gameTime.deltaTime;
+        this.cf.a += 0.2 * gameTime.deltaTime;
+        /* position the eyeball */
+        this.position.x = this.cf.x + Math.cos( this.cf.a * Math.PI / 180) * 150;
+        this.position.y = this.cf.y + Math.sin( this.cf.a * Math.PI / 180) * 150;
+        posObj( this );// draw the sprite
+        if ( this.position.y > pixelSize( this.size ) / 2 + canvas.height ) return true; // if gone off screen
+        if ( gameControl.stage == 2 && player.postHit.flag == false && collision( player, this ) ){// if game playing and players post-hit flag is off, do a collision check between this enemy and the player ship
+            player.hit();// hit scored on player
+            return this.hit( false );//return whether hit causes this eyeball to die
+            
         }
-        return die;
+        return false;// still on screen and not hit player then I'm alive - player bullets code will check if I been hit by bullet
     }
 }
 
-function $d(x,y,s){// star
-    this.s=s; //scale/size % of canvas width
-    this.x=x; //x position
-    this.y=y; // y position
-    this.yv=.6*s; // y velocity
-    this.a=0; // alpha
-    this.os=A(s)/2; // half sprite height for off screen check in u()
-    this.p=[
+function star( x, y, s){
+    this.size = s; // % of canvas width
+    this.position = {
+        x: x,
+        y: y
+    };
+    this.angle = 0;
+    this.velocity = { y: 0.06 * s};
+    this.offScreen = pixelSize( s ) / 2; // half sprite height for off screen check in update()
+    this.polygons=[
         {
-            f:'#aab',
-            l:[
+            fill: '#aab',
+            lines:[
                 [   200,15,
                     260,40,
                     270,50,
@@ -999,8 +1070,8 @@ function $d(x,y,s){// star
                 ]
             ]
         },{
-            f:'#aab',
-            l:[
+            fill: '#aab',
+            lines:[
                 [
                     110,15,
                     170,40,
@@ -1016,257 +1087,266 @@ function $d(x,y,s){// star
             ]
         }
     ]
-    this.u=function (){ // update function
-        this.y+=this.yv;
-        if (this.y>(this.os+v.height)){
-            this.y=0-this.os;
-            this.x=Math.random()*v.width;
+    this.update = function (){
+        this.position.y += this.velocity.y * gameTime.deltaTime;
+        if ( this.position.y> ( this.offScreen + canvas.height)){// if off bottom of screen
+            this.position.y = 0 - this.offScreen;// put back at top of screen
+            this.x=Math.random()*canvas.width;// add a bit of variety
         }
-        B(this);
+        posObj( this );// draw the sprite
     }
 }
 
-function $e(x,y,xv,yv,s){// playerbullet
-    this.s=s; //scale/size % of canvas width
-    this.x=x; //x position
-    this.y=y; // y position
-    this.yv=yv; // y velocity
-    this.xv=xv; // x velocity
-    this.a=0; // angle
-    this.os=A(s)/2; // half sprite height for off screen check in u()
-    this.p=[
+function playerBullet( x, y, xv, yv, s ){
+    this.size = s; // % of canvas width
+    this.position = {
+        x: x,
+        y: y
+    };
+    this.velocity = {
+        z: xv,
+        y: yv
+    };
+    this.angle = 0;
+    this.offScreen = pixelSize( s ) / 2; // half sprite height for off screen check in update()
+    this.polygons=[
         {
-            b:'rgba(20,200,255,0.5)',
-            f:'#aab',
-            lw:.4,
-            sh:'#14c8ff',
-            sb:20,
-            lc:'round',
-            l:[
+            stroke: 'rgba(20,200,255,0.5)',
+            fill: '#aab',
+            lineWidth: 0.4,
+            shadow: '#14c8ff',
+            shadowBlur: 20,
+            lineCap: 'round',
+            lines:[
                 [   270,45,
                     90,45
                 ]
             ]
         },{
-            b:'rgba(20,200,255,.5)',
-            f:'#aab',
-            lw:.28,
-            lc:'round',
-            l:[
+            stroke: 'rgba(20,200,255,0.5)',
+            fill: '#aab',
+            lineWidth: 0.28,
+            lineCap: 'round',
+            lines:[
                 [
                     270,44,
                     90,44
                 ]
             ]
         },{
-            b:'#eef',
-            f:'#aab',
-            lw:.15,
-            lc:'round',
-            l:[
+            stroke: '#eef',
+            fill: '#aab',
+            lineWidth: 0.15,
+            lineCap: 'round',
+            lines:[
                 [
                     270,43,
                     90,43
                 ]
             ]
         }
-    ]
-    this.cl={ //collision
-        r:[
+    ];
+    this.collision = {
+        rectangle:[
                 260,63,22,100
         ]
-    }
-    this.u=function (){ // update function
-        var die=false;
-        this.y+=this.yv*t.d;
-        this.x+=this.xv;
-        if (this.y<(0-this.os)) die=true;
-        B(this);
-        /*collision check*/
-        for (var i=bds.length-1;i>-1;i--){ //loop backwards to avoid element being missed after splicing
-            if (F(this,bds[i])){
-                die=true;
-                if(bds[i].h(true))bds.splice(i,1);
+    };
+    this.update = function (){
+        this.position.y += this.velocity.y * gameTime.deltaTime;
+        if ( this.position.y < ( 0-this.offScreen ) ) return true;// gone off top of screen
+        posObj( this );// draw the sprite
+        /*collision check - check this bullet against each enemy*/
+        for ( let i = enemies.length - 1; i > -1; i-- ){ //loop backwards to avoid element being missed after splicing
+            if ( collision( this, enemies[i] ) ){
+                if( enemies[i].hit( true ) ) enemies.splice( i, 1 );// if collisiln call enemy hit and remove from enemies array if hit kills it
+                return true;// yep, I'm dead
             }
         }
-        return die;
+        return false; //hit nothing and still on screen = alive
     }
 }
 
-function $f(x,y,s){// explotsion
-    this.x=x;
-    this.y=y;
-    this.s; //scale/size % of canvas width
-    this.r=0;
-    this.rt=s/5+(Math.random()*s)/3;
-    this.sh=false;// flag for shrink phase of animation
-    this.xv=(Math.random()-0.5)*2//x velocity
-    this.yv=0-1-Math.random();//y velocity
-    this.d=t.s+Math.random()*300; //delay before start
-    this.u=function (){ // update function
-        if (t.s>this.d){
-            var die=false;
-            if(this.sh){
-                this.r-=0.075;
-                this.x+=this.xv;
-                this.y+=this.yv;
-                if(this.r<0){
-                    this.r=0;
-                    die=true;
-                }
+function explosionCloud(x,y,s){
+    this.position = {
+        x: x,
+        y: y
+    };
+    this.size = s; // % of canvas width
+    this.radius=0; //radius of the cloud
+    this.radiusTarget = s / 5 + ( Math.random() * s ) / 3;// what size the cloud will grow to before shrinking
+    this.shrink=false;// flag for shrink phase of animation
+    this.velocity={
+        x: ( Math.random() - 0.5 ) * 2,
+        y: -1-Math.random()
+    };
+    this.delay = gameTime.lastStamp + Math.random() * 300; //delay before start
+    this.update = function (){
+        if ( gameTime.lastStamp > this.delay){
+            if( this.shrink ){
+                this.radius -= 0.075;
+                this.position.x += this.velocity.x;
+                this.position.y += this.velocity.y;
+                if( this.radius < 0 ) return true; // pfffff - gone
             }else{
-                this.r+=.3;
-                if(this.r>this.rt)
+                this.radius += 0.3;
+                if( this.radius > this.radiusTarget )
                 {
-                    this.r=this.rt;
-                    this.sh+=true;
+                    this.radius = this.radiusTarget;
+                    this.shrink+=true;
                 }
             }
-            var r=A(this.r);
-            c.beginPath();
-            c.strokeStyle='#aaa';
-            c.fillStyle='#eef';
-            c.lineWidth=10*A(this.rt)/100;
-            c.arc(this.x,this.y,r,0,6.28);
-            c.closePath();
-            c.stroke();
-            c.fill();
+            var r = pixelSize( this.r );
+            context.beginPath();
+            context.strokeStyle= '#aaa';
+            context.fillStyle= '#eef';
+            context.lineWidth = 10 * pixelSize( this.radiusTarget ) / 100;
+            context.arc( this.position.x,this.position.y, pixelSize( this.radius ), 0, 2 * Math.PI );
+            context.closePath();
+            context.stroke();
+            context.fill();
         
-            return die;
+            return false; // still here!
         }
     }
 }
 
-function $g(x,y,tw){ //pickup
-    this.x=x;
-    this.y=y;
-    this.yv=-.18;
-    this.tw=tw;// type of weapon pickup effects
-    this.c=(tw==1)?'#59c':(tw==2)?'#5c5':'#b95';
-    this.s=3;
-    this.r=50;
-    this.rv=-.05;
-    this.cl={//collision
-        c:[
+function pickup( x, y, wt ){ //wt=weapon type - 1 guns, 2 speed, 3 shields
+    this.position={
+        x: x,
+        y: y,
+        radius: 50
+    };
+    this.velocity = {
+        y: -0.18,
+        radius: -0.05
+    }
+    this.weaponType = wt;
+    this.col = (wt == 1) ? '#59c' : ( wt ==2 ) ? '#5c5' : '#b95';// colour
+    this.size = 3;
+    this.collision={
+        circle:[
             0,0,50
         ]
     }
-    this.h =function(){
-        var m='',c='';
-        switch(this.tw){
+
+    this.hit = function(){
+        var message, col;  // message and colour for the billboard
+        switch( this.weaponType ){
             case 1:
-            if(pl.wp.g>4){
-                pl.wp.g--;
-                m='Guns Down!';
-                c='255,0,0';
+            if(player.weapons.guns > 4){
+                player.weapons.guns--;
+                message = 'Guns Down!';
+                col = '255,0,0';
             }else{
-                pl.wp.g++;
-                m='Guns Up!';
-                c='85,153,204';
+                player.weapons.guns++;
+                message = 'Guns Up!';
+                col = '85,153,204';
             }
             break
 
             case 2:
-            if(pl.wp.s>4){
-                pl.wp.s--;
-                m='Speed Down!';
-                c='255,0,0';
+            if( player.weapons.speed > 4){
+                player.weapons.speed--;
+                message = 'Speed Down!';
+                col = '255,0,0';
             }else{
-                pl.wp.s++;
-                m='Speed Up!';
-                c='85,204,85';
+                player.weapons.speed++;
+                message = 'Speed Up!';
+                col = '85,204,85';
             }
             break
 
             default:
-            if(pl.wp.sh>4){
-                pl.wp.sh--;
-                m='Shields Down!';
-                c='255,0,0';
+            if( player.weapons.shields > 4){
+                player.weapons.shields--;
+                message = 'Shields Down!';
+                col = '255,0,0';
             }else{
-                pl.wp.sh++;
-                m='Shields Up!';
-                c='187,153,85';
+                player.weapons.shields++;
+                message = 'Shields Up!';
+                col = '187,153,85';
             }
         }
-        blb.push(new $h(m,c));
+        billboards.push( new billboard( message, col ) );
     }
-    this.u=function(){
-        var s=A(this.s),die=false;
-        c.beginPath();
-        c.fillStyle=this.c;
-        c.shadowColor=this.c;
-        c.shadowBlur=20;
-        c.arc(this.x,this.y,this.r*s/100,0,6.28);
-        c.closePath();
-        c.fill();
-        this.r+=this.rv*t.d;
-        if(this.r<30){
-            this.r=30;
-            this.rv*=-1;
-        }else if (this.r>50){
-            this.r=50;
-            this.rv*=-1;
+    this.update = function(){
+        let s = pixelSize( this.size ); // save keep calling function (used 3 times)
+        /* draw the pickup */
+        context.beginPath();
+        context.fillStyle = this.col;
+        context.shadowColor = this.col;
+        context.shadowBlur = 20;
+        context.arc( this.position.x, this.position.y, this.position.radius * s / 100, 0, 2 * Math.PI );
+        context.closePath();
+        context.fill();
+
+        /* pulsate effect: */
+        this.position.radius += this.velocity.radius * gameTime.deltaTime;
+        if( this.position.radius < 30 ){
+            this.position.radius = 30;
+            this.velocity.radius*= -1;
+        }else if ( this.position.radius > 50){
+            this.position.radius = 50;
+            this.velocity.radius *= -1;
         }
-        this.y-=s*this.yv*t.d/100;
-        if(this.y>v.height+s/2)die=true;
-        if (F(pl,this)){
-            die=true;
-            this.h()
+        this.position.y-= s * this.velocity.y / 100 * gameTime.deltaTime;
+        if( this.position.y > canvas.height + s / 2 ) return true; // gone off screen
+        if ( collision( player, this )){// colide with player?
+            this.hit()// call hit function
+            return true;//yes i'm gone
         }
-        return die;
+        return false;//still here
     }
 }
 
-function $h(m,cl){// weapons billboard
-    this.m=m; //message
-    this.c=cl; //colour
-    this.a=1; // alpha
-    this.s=30//.02*v.width;//font size
-    this.ms=.08*v.width;//max font size before commence alpha fade
-    this.sv=.0001*v.width;//size velocity
-    this.u=function(){
-        this.s+=this.sv*t.d;
-        if(this.s>this.ms)this.a-=.001*t.d;
-        if (this.a<0)return true;
-        c.fillStyle='rgba('+this.c+','+this.a.toString()+')';
-        c.shadowColor=c.fillStyle;
-        c.shadowBlur=s*.25;
-        c.font=Math.round(this.s).toString()+'px impact';
-        c.textAlign='center'
-        c.fillText(this.m,v.width/2,v.height/2);
+function billboard( m, cl ){// 'weapon up' billboard
+    this.message = m;
+    this.col = cl; //colour
+    this.alpha = 1;
+    this.size = 0.02 * canvas.width;//font size
+    this.maxSize = 0.08 * canvas.width;//max font size before commence alpha fade
+    this.sizeVel = 0.0001 * canvas.width;//size velocity
+    this.update = function(){
+        this.size+= this.sizeVel * gameTime.deltaTime;
+        if( this.size > this.maxSize )this.alpha-= 0.001 * gameTime.deltaTime;
+        if ( this.alpha < 0 ) return true;
+        context.fillStyle= 'rgba(' + this.col + ','+this.alpha.toString() + ')';
+        context.shadowColor = context.fillStyle;
+        context.shadowBlur = this.size * 0.25;
+        context.font = Math.round( this.size ).toString() + 'px impact';
+        context.textAlign = 'center';
+        context.fillText( this.message, canvas.width / 2, canvas.height / 2);
     }
     return false;  
 }
 
-function $i(x,y){ // enemy bullit
-    this.s=1;//v.width/100; //scale/size % of canvas width
-    this.x=x; //x position
-    this.y=y;//y; // y position
-
+function enemyBullet( x, y ){
+    this.size = 1;// % of canvas width
+    this.position = { x: x,y: y };
     /* to get xv and yv we need angle from spawn location to player position*/
-    var adj=Math.abs(pl.y-y);
-    var hyp=Math.sqrt(Math.pow((pl.x-x),2)+Math.pow((pl.y-y),2));
-    var ang=Math.acos(adj/hyp)*180/Math.PI;
-    x<pl.x?ang=90-ang:ang=90+ang; // x velocity
-    this.xv=Math.cos(ang*.01745)*.35;//x velocity
-    this.yv=Math.sin(ang*.01745)*.35; // y velocity
-    this.a=90;
-    this.os=A(this.s)/2; // half sprite height for off screen check in u()
-    this.af=0;
-    this.p=[
+    let adj = Math.abs( player.position.y - y );
+    let hyp = Math.sqrt( Math.pow( (player.position.x - x), 2) + Math.pow( ( player.position.y - y ), 2 ) );
+    let ang = Math.acos( adj/hyp ) * 180 / Math.PI;
+    x < player.position.x ? ang = 90 - ang : ang = 90 + ang; // x velocity left to right or right to left
+    this.velocity = {
+        x: Math.cos( ang * Math.PI / 180 ) * 0.35,
+        y: Math.sin( ang * 0.01745) * 0.35
+    };
+    this.angle = 90;
+    this.offScreen = pixelSize( this.size ) / 2; // half sprite height for off screen check in update()
+    this.polygons=[
         {
-            b:'#a00',
-            f:'#e00',
-            a:[
+            stroke: '#a00',
+            fill: '#e00',
+            arc:[
                 [
                     0,0,50,0,6.3
                 ]
             ]
         },{
-            b:'#caa',
-            f:'#fee',
-            a:[
+            stroke: '#caa',
+            fill: '#fee',
+            arc:[
                 [
                     0,0,25,0,6.3
                 ]
@@ -1274,20 +1354,22 @@ function $i(x,y){ // enemy bullit
         },
     ];
 
-    this.cl={ //collision
-        c:[
+    this.collision = {
+        circle:[
                 0,0,20
         ]
-    }
-    this.u=function (){ // update function
-       this.x+=this.xv*t.d;
-       this.y+=this.yv*t.d;
-        if (this.y>(this.os+v.height) || this.y<(0-this.os) || this.x<(0-this.os) || this.x>(v.width+this.os)){
-             return true;
-        }
-        B(this);
-        if (ctrl.stage==2 && F(pl,this)){
-            pl.h();
+    };
+    
+    this.update = function (){
+       this.position.x+= this.velocity.x * gameTime.deltaTime;
+       this.position.y+= this.velocity.y * gameTime.deltaTime;
+        if ( this.position.y > ( this.offScreen + canvas.height ) 
+        || this.position.y < ( 0 - this.offScreen ) 
+        || this.position.x < ( 0 - this.offScreen ) 
+        || this.position.x > ( canvas.width + this.offScreen ) ) return true; // off screen so dead
+        posObj( this );// draw the sprite
+        if ( gameControl.stage == 2 && player.postHit.flag == false && collision( player, this ) ){// if game playing and players post-hit flag is off, do a collision check between this bullet and the player ship
+            player.hit();
             return true;
         }
         return false;
@@ -1295,27 +1377,30 @@ function $i(x,y){ // enemy bullit
 
 }
 
-function $j(cl,y){// baddie 3
-    this.s=4; //scale/size % of canvas width
-    this.x=Math.random()*v.width; //x position
-    this.y=0-(v.height*y/100)-(A(s)/2) // y position
-    this.yv=5+Math.random()*5; // velocity
-    this.xv=0;// this is actually an angle so we can do a sin wave for x movement
-    this.a=180; // angle
-    this.af=0; // animation frame
-    this.p=[
+function straightDownEnemy( cl, y ){ //cl=index of cols[] (purty colour).  y = how high off page to spawn
+    this.size=4; //% of canvas width
+    this.position = {
+        x: Math.random() * canvas.width,
+        y: 0 - ( canvas.height * y / 100 ) - ( pixelSize( this.size ) / 2 )
+    }
+    this.velocity = {
+        y: 0.5 + Math.random() / 12,
+        x: 0// this is actually an angle so we can do a sin wave for x movement
+    }
+    this.angle = 180;
+    this.polygons = [
         {
-            b:cols[cl].b,
-            f:cols[cl].f,
-            lw:.1,
-            a:[
+            stroke: cols[cl].stroke,
+            fill: cols[cl].fill,
+            lineWidth: 0.1,
+            arc:[
                 [
                     270,45,20,0,3.15
                 ]
             ]
         },{
-            f:cols[cl].b,
-            l:[
+            fill: cols[cl].stroke,
+            lines:[
                 [
                     320,20,
                     280,45,
@@ -1324,10 +1409,10 @@ function $j(cl,y){// baddie 3
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#95a5a6',
-            lw:.1,
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#95a5a6',
+            lineWidth: 0.1,
+            lines:[
                 [
                     300,48,
                     350,50,
@@ -1342,10 +1427,10 @@ function $j(cl,y){// baddie 3
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:cols[cl].b,
-            lw:.02,
-            l:[
+            stroke: '#7f8c8d',
+            fill: cols[cl].stroke,
+            lineWidth: 0.02,
+            lines:[
                 [
                     242,15,
                     200,28,
@@ -1358,9 +1443,9 @@ function $j(cl,y){// baddie 3
                 ]
             ]
         },{
-            f:cols[cl].f,
-            lw:.02,
-            l:[
+            fill: cols[cl].fill,
+            lineWidth: 0.02,
+            lines:[
                 [
                     242,5,
                     298,5,
@@ -1371,9 +1456,9 @@ function $j(cl,y){// baddie 3
                 ]
             ]
         },{
-            b:'#2c3e50',
-            f:'#455a6f',
-            l:[
+            stroke: '#2c3e50',
+            fill: '#455a6f',
+            lines:[
                 [
                     90,25,
                     110,23,
@@ -1386,159 +1471,179 @@ function $j(cl,y){// baddie 3
             ]
         }
     ]
-    this.cl={ //collision
-        c:[ // circles
+    this.collision = {
+        circle:[
                 0,0,45
         ]
     }
 
-    this.h=function(p){// hit taken function - p=pickup possible?(no pickup when crash into ship)
-        E(this.x,this.y,this.s,p);
-        return true;
+    this.hit = function( p ){// hit taken function - p=pickup possible?(no pickup when crash into ship)
+        explosion( this.position.x, this.position.y, this.size, p );// make explosion
+        return true; // yep, it be dead
     }
 
-    this.u=function (){ // update function
-        var die=false;
-        this.y+=this.yv;
-        if(this.y>v.height+A(this.s))die=true;
-        B(this);
-        if (this.y>A(this.s)/2+v.height) die=true; // if gone off screen
-        if (ctrl.stage==2 && F(pl,this)){
-            die=this.h(false);
-            pl.h();
+    this.update = function (){
+        this.position.y+= this.velocity.y * gameTime.deltaTime;
+        /* x velocity is just an angle looping round, that we use to make a sin wave */
+        this.position.x+= Math.sin( this.velocity.x * Math.PI / 180 ) * 0.5 * gameTime.deltaTime;
+        this.velocity.x = (this.velocity.x + 3.5) % 359;
+        if( this.position.y > canvas.height + pixelSize( this.size ) ) return true; //gone off screen
+        posObj( this );
+        if ( gameControl.stage == 2 && player.postHit.flag == false && collision( player, this ) ){// if game playing and players post-hit flag is off, do a collision check between this enemy and the player ship
+            player.hit();
+            return this.hit( false );
         }
-        return die;
+        return false;
     }
 }
+
 // O B J E C T    L I T E R A L S
 var hud={
-    gi:{// gun icon
-        s:2,
-        x:v.width*.9,
-        y:v.height*.15,
-        u:function(){
-            var s=A(this.s);
-            c.beginPath();
-            c.fillStyle='#59c';
-            c.strokeStyle='#fff';
-            c.shadowBlur=0;
-            c.lineWidth=s*8/100;
-            c.moveTo(this.x+48*s/100,this.y+12*s/100);
-            c.quadraticCurveTo(this.x+s*50/100,this.y+10*s/100,this.x+52*s/100,this.y+s*12/100);
-            c.quadraticCurveTo(this.x+70*s/100,this.y+30*s/100,this.x+70*s/100,this.y+70*s/100);
-            c.lineTo(this.x+30*s/100,this.y+70*s/100);
-            c.quadraticCurveTo(this.x+30*s/100,this.y+30*s/100,this.x+48*s/100,this.y+s*12/100);
-            c.moveTo(this.x+70*s/100,this.y+80*s/100);
-            c.lineTo(this.x+s*70/100,this.y+s*90/100);
-            c.lineTo(this.x+30*s/100,this.y+90*s/100);
-            c.lineTo(this.x+s*30/100,this.y+s*80/100);
-            c.closePath();
-            c.stroke();
-            c.fill();
-            for(var x=0;x<5;x++){
-                c.beginPath();
-                c.strokeStyle='#59c';
-                c.shadowColor='#59c';
-                c.rect(this.x+s*30/100+s*70/100*(x+1),this.y+s*30/100,s*40/100,s*40/100);
-                c.shadowBlur=(x<pl.wp.g)?8:0;
-                if(x<pl.wp.g)c.fill();
-                c.stroke();
-                c.closePath();
+    gunIcon:{
+        size: 2,
+        position: {
+            x: canvas.width * 0.9,
+            y: canvas.height * 0.15
+        },
+        update: function(){
+            let s = pixelSize( this.size );
+            context.beginPath();
+            context.fillStyle='#59c';
+            context.strokeStyle='#fff';
+            context.shadowBlur=0;
+            context.lineWidth= s * 8 / 100;
+            context.moveTo( this.position.x + 48 * s / 100, this.position.y + 12 * s / 100 );
+            context.quadraticCurveTo( this.position.x + s * 50 / 100, this.position.y + 10 * s / 100, this.position.x + 52 * s / 100, this.position.y + s * 12 / 100 );
+            context.quadraticCurveTo( this.position.x + 70 * s / 100, this.position.y + 30 * s / 100, this.position.x + 70 * s / 100, this.position.y + 70 * s / 100 );
+            context.lineTo( this.position.x + 30 * s / 100, this.position.y + 70 * s / 100 );
+            context.quadraticCurveTo( this.position.x + 30 * s / 100, this.position.y + 30 * s / 100, this.position.x + 48 * s / 100, this.position.y + s * 12 / 100 );
+            context.moveTo( this.position.x + 70 * s / 100, this.position.y + 80 * s / 100 );
+            context.lineTo( this.position.x + s * 70 / 100, this.position.y + s * 90 / 100 );
+            context.lineTo( this.position.x + 30 * s / 100, this.position.y + 90 * s / 100 );
+            context.lineTo( this.position.x + s * 30 / 100, this.position.y + s * 80 / 100 );
+            context.closePath();
+            context.stroke();
+            context.fill();
+            for(let i = 0; i < 5; i++ ){
+                context.beginPath();
+                context.strokeStyle = '#59c';
+                context.shadowColor = '#59c';
+                context.rect( this.position.x + s * 30 / 100 + s * 70 / 100 * ( i+1 ), this.position.y + s * 30 / 100, s * 40 / 100, s * 40 / 100);
+                context.shadowBlur = ( i < player.weapons.guns) ? 8 : 0;
+                if( i < player.weapons.guns )context.fill();
+                context.stroke();
+                context.closePath();
             }
         }
     },
-    si:{// speed icon
-        s:2,
-        x:v.width*.9,
-        y:v.height*.21,
-        u:function(){
-            var s=A(this.s);
-            c.beginPath();
-            c.strokeStyle='#fff';
-            c.lineWidth=s*8/100;
-            c.fillStyle='#5c5';
-            c.shadowBlur=0;
-            c.moveTo(this.x+68*s/100,this.y);
-            c.lineTo(this.x+s*30/100,this.y+s*44/100);
-            c.lineTo(this.x+51*s/100,this.y+57*s/100);
-            c.lineTo(this.x+20*s/100,this.y+s);
-            c.lineTo(this.x+s*80/100,this.y+s*50/100);
-            c.lineTo(this.x+57*s/100,this.y+38*s/100);
-            c.closePath();
-            c.stroke()
-            c.fill();
-            for(var x=0;x<5;x++){
-                c.beginPath();
-                c.strokeStyle='#5c5';
-                c.shadowColor='#5c5';
-                c.rect(this.x+s*30/100+s*70/100*(x+1),this.y+s*30/100,s*40/100,s*40/100);
-                c.shadowBlur=(x<pl.wp.s)?8:0;
-                if(x<pl.wp.s)c.fill();
-                c.stroke();
-                c.closePath();
+    speedIcon:{
+        size:2,
+        position: {
+            x: canvas.width * 0.9,
+            y: canvas.height * 0.21,
+        },
+        update: function(){
+            let s = pixelSize( this.size );
+            context.beginPath();
+            context.strokeStyle = '#fff';
+            context.lineWidth = s * 8 / 100;
+            context.fillStyle = '#5c5';
+            context.shadowBlur = 0;
+            context.moveTo( this.position.x + 68 * s / 100, this.position.y );
+            context.lineTo( this.position.x + s * 30 / 100, this.position.y + s * 44 / 100 );
+            context.lineTo( this.position.x + 51 * s / 100, this.position.y + 57 * s / 100 );
+            context.lineTo( this.position.x + 20 * s / 100, this.position.y + s );
+            context.lineTo( this.position.x + s * 80 / 100, this.position.y + s * 50 / 100 );
+            context.lineTo( this.position.x + 57 * s / 100, this.position.y + 38 * s / 100 );
+            context.closePath();
+            context.stroke()
+            context.fill();
+            for( let i = 0; i < 5; i++ ){
+                context.beginPath();
+                context.strokeStyle = '#5c5';
+                context.shadowColor = '#5c5';
+                context.rect( this.position.x + s * 30 / 100 + s * 70 / 100 * ( i+1 ), this.position.y + s * 30 / 100, s * 40 / 100, s * 40 / 100);
+                context.shadowBlur = ( i < player.weapons.speed) ? 8 : 0;
+                if( i < player.weapons.speed)context.fill();
+                context.stroke();
+                context.closePath();
             }
         }
     },
-    shi:{// shield icon
-        s:2,
-        x:v.width*.9,
-        y:v.height*.27,
-        u:function(){
-            var s=A(this.s);
-            c.beginPath();
-            c.strokeStyle='#fff';
-            c.lineWidth=s*8/100;
-            c.fillStyle='#b95';
-            c.shadowBlur=0;
-            c.moveTo(this.x+50*s/100,this.y+s*10/100);
-            c.quadraticCurveTo(this.x+64*s/100,this.y+s*20/100,this.x+83*s/100,this.y+26*s/100);
-            c.lineTo(this.x+83*s/100,this.y+37*s/100);
-            c.quadraticCurveTo(this.x+71*s/100,this.y+s*69/100,this.x+50*s/100,this.y+89*s/100);
-            c.quadraticCurveTo(this.x+29*s/100,this.y+s*69/100,this.x+17*s/100,this.y+37*s/100);
-            c.lineTo(this.x+17*s/100,this.y+26*s/100);            
-            c.quadraticCurveTo(this.x+36*s/100,this.y+s*20/100,this.x+50*s/100,this.y+10*s/100);
-            c.closePath();
-            c.stroke();
-            c.fill();
-            for(var x=0;x<5;x++){
-                c.beginPath();
-                c.strokeStyle='#b95';
-                c.shadowColor='#b95';
-                c.rect(this.x+s*30/100+s*70/100*(x+1),this.y+s*30/100,s*40/100,s*40/100);
-                c.shadowBlur=(x<pl.wp.sh)?8:0;
-                if(x<pl.wp.sh)c.fill();
-                c.stroke();
-                c.closePath();
+    shieldIcon:{
+        size:2,
+        position: {
+            x: canvas.width * 0.9,
+            y: canvas.height * 0.27
+        },
+        update: function(){
+            let s = pixelSize( this.size );
+            context.beginPath();
+            context.strokeStyle = '#fff';
+            context.lineWidth = s * 8 / 100;
+            context.fillStyle = '#b95';
+            context.shadowBlur = 0;
+            context.moveTo( this.position.x + 50 * s / 100, this.position.y + s * 10 / 100 );
+            context.quadraticCurveTo( this.position.x + 64 * s / 100, this.position.y + s * 20 / 100, this.position.x + 83 * s / 100, this.position.y + 26 * s / 100 );
+            context.lineTo( this.position.x + 83 * s / 100, this.position.y + 37 * s / 100 );
+            context.quadraticCurveTo( this.position.x + 71 * s / 100, this.position.y + s * 69 / 100, this.position.x + 50 * s / 100, this.position.y + 89 * s / 100 );
+            context.quadraticCurveTo( this.position.x + 29 * s / 100, this.position.y + s * 69 / 100, this.position.x + 17 * s / 100, this.position.y + 37 * s / 100 );
+            context.lineTo( this.position.x + 17 * s / 100, this.position.y + 26 * s / 100 );            
+            context.quadraticCurveTo( this.position.x + 36 * s / 100, this.position.y + s * 20 / 100, this.position.x + 50 * s / 100, this.position.y + 10 * s / 100 );
+            context.closePath();
+            context.stroke();
+            context.fill();
+            for( let i = 0; i < 5; i++ ){
+                context.beginPath();
+                context.strokeStyle = '#b95';
+                context.shadowColor = '#b95';
+                context.rect( this.position.x + s * 30 / 100 + s * 70 / 100 * ( i+1 ), this.position.y + s * 30 / 100, s * 40 / 100, s * 40 / 100 );
+                context.shadowBlur = ( i <player.weapons.shields ) ? 8 : 0;
+                if( i < player.weapons.shields )context.fill();
+                context.stroke();
+                context.closePath();
             }
         }
     },
-    scr:{// score
-        s:4, // size = % of screen width
-        u:function(){
-            var ps=A(this.s); // size in pixels
-            c.fillStyle='#f00';
-            c.shadowColor='#f00';
-            c.shadowBlur=ps*.05;
-            c.font=Math.round(ps).toString()+'px impact';
-            console.log(s);
-            c.textAlign='right';
-            c.fillText('Score: '+ctrl.sc,v.width-20,20+ps);
+    score: {
+        size:4, // % of screen width
+        update: function(){
+            let ps = pixelSize( this.size ); // size in pixels
+            context.fillStyle = '#f00';
+            context.shadowColor = '#f00';
+            context.shadowBlur = ps * 0.05;
+            context.font = Math.floor(ps).toString() + 'px impact';
+            context.textAlign = 'right';
+            context.fillText( 'Score: ' + gameControl.score.toString(), canvas.width - 20, 20 + ps );
         }
     }
 }
-var pl={// player ship
-    x:v.width/2,
-    y:v.height*.92,
-    a:0, //angle,
-    s:8, //scale/size
-    af:0, //animation frame
-    bsp:[{a:270,h:54},{a:208,h:50},{a:332,h:50}], //bulllet spawn points
-    wp:{g:1,s:0,sh:0}, // weapons - g=gun, s=speed,sh-shields
-    bts:[], // bullets
-    p:[{  // layers/polygons
-            b:'#2980b9',
-            f:'#3498db',
-            l:[
+var player={// player ship
+    position: {
+        x: canvas.width/2,
+        y: canvas.height * 0.92,
+    },
+    angle: 0,
+    size: 8, // % of canvas width
+    bulletSpawnPoint:[{a:270,h:54},{a:208,h:50},{a:332,h:50}],// angle and hypotenuse to locate x & y of bullet spawn point
+    weapons: {
+        guns: 1,
+        speed: 0,
+        shields: 0
+    }, 
+    postHit: {
+        flag: true,
+        time: 0,
+        flash: 1, //1=on, -1=off
+        flashTime: 0
+    },
+    bullets: [],
+    bulletTime: 0, //time before new bullet can be spawned, releasing spacebar decreases this slightly to reward the not-so-lazy button tappers and to punish the idle button holders :-p
+    bulletGap: 600, // gap in milliseconds between bulets, power-ups decrease this                                      
+    polygons:[{
+            stroke: '#2980b9',
+            fill: '#3498db',
+            lines:[
                 [
                     270,20,
                     350,40,
@@ -1550,9 +1655,9 @@ var pl={// player ship
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#bdc3c7',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#bdc3c7',
+            lines:[
                 [
                     348,42,
                     350,45,
@@ -1561,9 +1666,9 @@ var pl={// player ship
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#bdc3c7',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#bdc3c7',
+            lines:[
                 [
                     192,42,
                     190,45,
@@ -1572,9 +1677,9 @@ var pl={// player ship
                 ]
             ]
         },{
-            b:'#7f8c8d',
-            f:'#bdc3c7',
-            l:[
+            stroke: '#7f8c8d',
+            fill: '#bdc3c7',
+            lines:[
                 [
                     267,40,
                     273,40,
@@ -1586,9 +1691,9 @@ var pl={// player ship
                 ]
             ]
         },{
-            b:'#cdd3d7',
-            f:'#cdd3d7',
-            l:[
+            stroke: '#cdd3d7',
+            fill: '#cdd3d7',
+            lines:[
                 [
                     267,30,
                     273,30,
@@ -1600,9 +1705,9 @@ var pl={// player ship
                 ]
             ]
         },{
-            b:'#2c3e50',
-            f:'#455a6f',
-            l:[
+            stroke: '#2c3e50',
+            fill: '#455a6f',
+            lines:[
                 [
                     270,16,
                     280,15,
@@ -1614,110 +1719,125 @@ var pl={// player ship
             ]
         }
     ],
-    cl:{
-        r:[
+    collision:{
+        rectangle:[
             265,40,8,30,
             190,46,90,30
         ]
     },
-    e: function(){//engine
-        var x=this.x,y=this.y,s=A(this.s*(Math.random()*.03+.2)),fs=s+pl.wp.s*2.5;
-        c.beginPath();
-        c.fillStyle='#6ce';
-        c.lineWidth=1;
-        c.shadowColor='#6ce';
-        c.shadowBlur=20;
-        c.moveTo(x,y+.75*s);
-        c.quadraticCurveTo(x+.6*fs,y+1.5*fs,x,y+2*fs);
-        c.quadraticCurveTo(x-.6*fs,y+1.5*fs,x,y+.75*s);
-        c.closePath();
-        c.fill();
+    engine: function(){
+        let s = pixelSize( this.size * ( Math.random() * 0.03 + 0.2 ) );
+        let speedBoost = s + player.weapons.speed * 2.5;
+        context.beginPath();
+        context.fillStyle = '#6ce';
+        context.lineWidth = 1;
+        context.shadowColor = '#6ce';
+        context.shadowBlur = 20;
+        context.moveTo( player.position.x, player.position.y + 0.75*s );
+        context.quadraticCurveTo( player.position.x + .06 * speedBoost, player.position.y + 1.5 * speedBoost, player.position.x, player.position.y + 2 * speedBoost );
+        context.quadraticCurveTo( player.position.x - 0.6 * speedBoost , player.position.y + 1.5 * speedBoost , player.position.x, player.position.y + 0.75*s);
+        context.closePath();
+        context.fill();
         
-        c.beginPath();
-        c.fillStyle='#eef';
-        c.lineWidth=1;
-        c.shadowColor='#eef';
-        c.shadowBlur=20;
-        c.moveTo(x,y+s);
-        c.quadraticCurveTo(x+.25*fs,y+1.4*fs,x,y+1.8*fs);
-        c.quadraticCurveTo(x-.25*fs,y+1.4*fs,x,y+s);
-        c.closePath();
-        c.fill();
+        context.beginPath();
+        context.fillStyle = '#eef';
+        context.lineWidth = 1;
+        context.shadowColor = '#eef';
+        context.shadowBlur = 20;
+        context.moveTo( player.position.x, player.position.y + s );
+        context.quadraticCurveTo( player.position.x + 0.25 * speedBoost, player.position.y + 1.4 * speedBoost, player.position.x, player.position.y + 1.8 * speedBoost );
+        context.quadraticCurveTo( player.position.x - 0.25 * speedBoost , player.position.y + 1.4 * speedBoost, player.position.x, player.position.y + s);
+        context.closePath();
+        context.fill();
     },
-    h:function(){// hit taken
-        pl.wp.sh--;
-        if(pl.wp.sh<0){
-            pl.wp.sh=0;
-            ctrl.stage=3;
-            ctrl.go=0;
-            E(this.x,this.y,this.s*2,false);
-        }
+    hit: function(){// hit taken
+        player.weapons.shields--;
+        player.postHit.flag = true;
+        player.postHit.time = gameTime.lastStamp + 1200;
+        if( player.weapons.shields < 0 ){ // if no shields then die
+            player.weapons.shields = 0;
+            gameControl.stage = 3;// set game controle stage to 3, 'GAME OVER'
+            gameControl.stageSize = 0; // 'GAME OVER' text grows in, so starts at 0
+            explosion( this.position.x, this.position.y, this.size * 2, false ); // create exlosion at double size of player ship
+        }  
     },
-    sh:function(){
-        var s=A(this.s),x=this.x,y=this.y;
-        c.fillStyle='rgba(187,153,85,'+pl.wp.sh*.1.toString()+')';
-        c.shadowColor='b95';
-        c.shadowBlur=s*.15;;
-        c.lineWidth=.2*s;
-        c.beginPath();
-        c.moveTo(x-.05*s,y-.5*s);
-        c.quadraticCurveTo(x,y-.55*s,x+.05*s,y-.5*s);
-        c.quadraticCurveTo(x+.15*s,y-.15*s,x+.5*s,y-.15*s);
-        c.quadraticCurveTo(x+.6*s,y,x+.45*s,y+.25*s);
-        c.quadraticCurveTo(x+.2*s,y+.3*s,x+.05*s,y+.45*s);
-        c.lineTo(x-.05*s,y+.45*s);
-        c.quadraticCurveTo(x-.2*s,y+.3*s,x-.45*s,y+.25*s);
-        c.quadraticCurveTo(x-.6*s,y,x-.5*s,y-.15*s);
-        c.quadraticCurveTo(x-.15*s,y-.15*s,x-.05*s,y-.5*s);
-        c.closePath();
-        c.fill();
+    shield: function(){ //draw the shield around the ship
+        let s = pixelSize( this.size );
+        context.fillStyle = 'rgba(187,153,85,' + player.weapons.shields * 0.1.toString() + ')';
+        context.shadowColor = 'b95';
+        context.shadowBlur = s * 0.15;;
+        context.lineWidth = 0.2 * s;
+        context.beginPath();
+        context.moveTo( this.position.x - 0.05 * s, this.position.y - 0.5 * s);
+        context.quadraticCurveTo( this.position.x, this.position.y- 0.55 * s, this.position.x + 0.05 * s , this.position.y - 0.5 * s );
+        context.quadraticCurveTo( this.position.x + 0.15 * s, this.position.y - 0.15 * s, this.position.x + 0.5 * s, this.position.y - 0.15 * s);
+        context.quadraticCurveTo( this.position.x + 0.6 * s, this.position.y, this.position.x + 0.45 * s, this.position.y + 0.25 * s );
+        context.quadraticCurveTo( this.position.x + 0.2 * s, this.position.y + 0.3 * s, this.position.x + 0.05 * s, this.position.y + 0.45 * s );
+        context.lineTo( this.position.x - 0.05 * s, this.position.y + 0.45 * s );
+        context.quadraticCurveTo( this.position.x - 0.2 * s, this.position.y + 0.3 * s, this.position.x - 0.45 * s, this.position.y + 0.25 * s );
+        context.quadraticCurveTo( this.position.x - 0.6 * s, this.position.y, this.position.x - 0.5 * s, this.position.y - 0.15 * s);
+        context.quadraticCurveTo( this.position.x - 0.15 * s, this.position.y - 0.15 * s, this.position.x - 0.05 * s, this.position.y - 0.5 * s );
+        context.closePath();
+        context.fill();
     },
-    u: function(){
-        var s=A(this.s);
+    update: function(){ // called evry frame by the sync() function.
+        let s = pixelSize( this.s );
+        //post-hit flash
+        if( player.postHit.flag ){ // post hit is when the player is momentarily immune - the ship will flash to indicate in this period
+            if( gameTime.lastStamp > player.postHit.time ) player.postHit.flag = false;//postHit immunity is over
+            if( gameTime.lastStamp > player.postHit.flashTime ){ // time to flip the flash flag?
+                player.postHit.flash*= -1;// invert flag (-1=off, 1==on)
+                player.postHit.flashTime = gameTime.lastStamp + 50;//50 milliseconds between on and off makes nice flash
+            }
+        }                                               
         //Movement
-        if(ctrl.l){
-            this.x-=(.2+pl.wp.s*.1)*t.d;
-            if(this.x<0)this.x=0;
-        }else if(ctrl.r){
-            this.x+=(.2+pl.wp.s*.1)*t.d;
-            if(this.x>v.width+s/2)this.x=v.width+s/2;
+        let speed = ( 0.2 + player.weapons.speed * 0.1 ) * gameTime.deltaTime;
+        if ( gameControl.keyPressed.left ){
+            this.position.x -= speed;
+            if( this.position.x < 0) this.position.x = 0;// stay on screen
+        } else if ( gameControl.keyPressed.right ){
+            this.position.x += speed;
+            if( this.position.x > canvas.width + s / 2) this.position.x = canvas.width + s / 2;// stay on screen
         }
-        if(ctrl.u){
-            this.y-=(.2+pl.wp.s*.1)*t.d;
-            if(this.y<s/2)this.y=s/2;
-        }else if(ctrl.d){
-            this.y+=(.2+pl.wp.s*.1)*t.d;
-            if(this.y>v.height-s/2)this.y=v.height-s/2;
+        if( gameControl.keyPressed.up ){
+            this.position.y -= speed;
+            if(this.position.y < s / 2 ) this.position.y= s / 2;
+        }else if( gameControl.keyPressed.down ){
+            this.position.y += speed;
+            if( this.position.y > canvas.height - s / 2 ) this.position.y = canvas.height - s / 2;
         }
         //shooting
-        if (ctrl.f && (t.s>ctrl.bt)){
-            ctrl.bt=t.s+ctrl.bg*(1-pl.wp.g*.1);
-            var h=0;shts=pl.wp.g;
-            if(shts>3)shts=3;
-            for (var x=0;x<shts;x++){
-                h=A(pl.s)*pl.bsp[x].h/100;
-                pl.bts.push(new $e(pl.x+Math.cos(pl.bsp[x].a*.01745)*h,pl.y+Math.sin(pl.bsp[x].a*.01745)*h,0,-.85,1.5));
+        if ( gameControl.keyPressed.fire && ( gameTime.lastStamp > player.bulletTime ) ){ // fire pressed and the wait time for new bullet passed?
+            player.bulletTime = gameTime.lastStamp + player.bulletGap * ( 1 - player.weapons.guns * 0.1 ); // bulletTime for next bullet calculated
+            let hyp = 0; // the hypotenuse to calculate bullets spawn point
+            let shots = player.weapons.guns; //how many shhots according toplayers gun strength
+            if( shots > 3 ) shots = 3; // 3 maximum
+            for ( let i = 0; i < shots; i++ ){
+                hyp = pixelSize( player.size ) * player.bulletSpawnPoint[i].h / 100;
+                player.bullets.push( new playerBullet( 
+                    player.position.x + Math.cos( player.bulletSpawnPoint[i].a * Math.PI / 180 ) * hyp, 
+                    player.position.y + Math.sin( player.bulletSpawnPoint[i].a * Math.PI / 180 ) * hyp, 
+                    0, -0.85, 1.5 ) 
+                );
             }
-            G(shot);
+            playSFX( soundFX.playerShot );// play laser shot sound
         }
-        this.e()//engines
-        B(pl);
-        if (this.wp.sh>=0)this.sh();
+        
+        if( ( (player.postHit.flag) && player.postHit.flash == 1 ) || ( !(player.postHit.flag) )){ // if player is not hit phase, or if he is the flash flag is on(1)
+            this.engine()// update and draw engines
+            posObj( player );// draw the ship sprite
+            if ( this.weapons.shields >= 0) this.shield();// draw shield
+        }
     } 
 }
 
-
-/* the game loop*/
-var sf=[];//star field
-var yr=v.height/8;
-for (var x=0;x<3;x++){
-    sf[x]=[];
-    for(var y=0;y<8;y++){
-        sf[x].push(new $d(Math.random()*v.width,y*yr,.5*(x+1)));
+var starfield=[];
+let yr=canvas.height/8; //distribute evenly on the y
+for ( let i = 0; i < 3; i++ ){
+    starfield[i] = [];
+    for( let j = 0; j < 8; j++){
+        starfield[i].push( new star( Math.random() * canvas.width, j * yr, 0.5 * ( i+1 ) ) );
     }
 }
-var ptc=[]; // particles
-var pkp=[]; //pickups
-var blb=[]; //billboards
-var ebs=[]; // enemy bullets
-window.requestAnimationFrame(S);
+
+window.requestAnimationFrame( sync ); // let the magic begin
